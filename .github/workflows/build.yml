@@ -17,11 +17,14 @@ jobs:
       - name: Build and test
         shell: pwsh
         run: .\bazelisk.exe --batch test //plugin/... --nocache_test_results --test_output=errors
-      - name: Package camera plugin
+      - name: Test release packaging
+        shell: pwsh
+        run: python -m unittest discover -s tools -p "*_test.py"
+      - name: Package Standard and Extended editions
         shell: pwsh
         run: python tools/package_release.py
       - uses: actions/upload-artifact@v4
         with:
-          name: experimental-camera-windows-x64
+          name: experimental-standard-and-extended-windows-x64
           path: dist/*
           if-no-files-found: error

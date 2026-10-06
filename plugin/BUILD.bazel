@@ -10,7 +10,7 @@ windows_resource(
 
 [cc_binary(
     name = "d2rl-%s.dll" % plugin,
-    srcs = ["%s.cpp" % plugin, "center_target.h", "settings_model.h", "settings_ui.h", "loader_gear_pixels.h", "marker_frame.h", "elite_target.h", "target_health.h", "target_ring_runtime.h", "target_ring.h", "nearest_target.h", "target_key.h", "movement_math.h", "cursor_hold.h", "automap_runtime.h", "automap_math.h", "automap_packets.h", "click_target_runtime.h", "click_target_native.h", "click_target.h", "target_runtime.h", "target_provider.h", "target_selection.h", "target_world.h"],
+    srcs = ["%s.cpp" % plugin, "distance_control.h", "distance_client.h", "distance_settings.h", "center_target.h", "settings_model.h", "settings_ui.h", "loader_gear_pixels.h", "marker_frame.h", "elite_target.h", "target_health.h", "target_ring_runtime.h", "target_ring.h", "nearest_target.h", "target_key.h", "movement_math.h", "cursor_hold.h", "automap_runtime.h", "automap_math.h", "automap_packets.h", "click_target_runtime.h", "click_target_native.h", "click_target.h", "target_runtime.h", "target_provider.h", "target_selection.h", "target_world.h"],
     copts = [
         "/utf-8",
         "/W3",
@@ -30,8 +30,16 @@ windows_resource(
 ]]
 
 cc_test(
+    name = "distance_control_test",
+    srcs = ["distance_control_test.cpp", "distance_control.h", "distance_client.h", "distance_settings.h"],
+    copts = ["/EHsc"],
+    deps = ["//plugin/third_party/sdk:sdk"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
     name = "settings_center_test",
-    srcs = ["settings_center_test.cpp", "settings_ui.h", "loader_gear_pixels.h", "settings_model.h", "center_target.h", "target_key.h", "nearest_target.h", "target_provider.h", "target_selection.h", "target_world.h", "target_ring.h", "automap_math.h"],
+    srcs = ["settings_center_test.cpp", "settings_ui.h", "distance_control.h", "loader_gear_pixels.h", "settings_model.h", "center_target.h", "target_key.h", "nearest_target.h", "target_provider.h", "target_selection.h", "target_world.h", "target_ring.h", "automap_math.h"],
     copts = ["/EHsc"],
     linkopts = ["user32.lib"],
     target_compatible_with = ["@platforms//os:windows"],

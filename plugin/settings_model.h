@@ -45,6 +45,7 @@ struct Layout {
         if(rect(18,280,240,28).contains(px,py)) return 101; // targeting
         if(rect(280,280,235,28).contains(px,py)) return 102; // map
         if(rect(18,317,240,28).contains(px,py)) return 103; // seal
+        if(rect(280,317,235,28).contains(px,py)) return 109; // optional distance service
         if(rect(335,355,38,26).contains(px,py)) return 104;
         if(rect(478,355,38,26).contains(px,py)) return 105;
         if(rect(335,389,38,26).contains(px,py)) return 106;

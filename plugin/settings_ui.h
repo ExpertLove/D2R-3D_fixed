@@ -5,6 +5,7 @@
 #include <string>
 #include "settings_model.h"
 #include "loader_gear_pixels.h"
+#include "distance_control.h"
 #include "target_ring.h"
 namespace camera_settings {
 inline SRWLOCK configLock=SRWLOCK_INIT;
@@ -104,7 +105,7 @@ inline std::string KeyName(unsigned scan) {
     if(scan==0x39) return "SPACE";
     return "SCAN "+std::to_string(scan);
 }
-inline void Draw(target_ring::Batch& b,bool targeting,bool map) {
+inline void Draw(target_ring::Batch& b,bool targeting,bool map,std::uint32_t distanceFlags=0) {
     if(b.width<640 || b.height<360) return;
     width.store(b.width);height.store(b.height);frameTick.store(GetTickCount64());
     const Layout l(b.width,b.height);const float s=l.scale;
@@ -133,6 +134,7 @@ inline void Draw(target_ring::Batch& b,bool targeting,bool map) {
     box(18,280,240,28);text(27,287,targeting?"TARGETING: ON":"TARGETING: OFF");
     box(280,280,235,28);text(290,287,map?"MAP FOLLOW: ON":"MAP FOLLOW: OFF");
     box(18,317,240,28);text(27,324,c.seal?"TARGET SEAL: ON":"TARGET SEAL: OFF");
+    if(distanceFlags&distance_control::Present) { box(280,317,235,28);text(290,324,distance_control::Label(distanceFlags)); }
     text(18,362,"MOUSE SENSITIVITY"); text(18,396,"CENTER RADIUS");
     for(int y:{355,389}) { box(335,float(y),38,26);box(478,float(y),38,26);text(349,float(y+6),"-");text(491,float(y+6),"+"); }
     text(385,362,(std::to_string(c.sensitivity)+"%").c_str());text(396,396,(std::to_string(c.radius)+"%").c_str());

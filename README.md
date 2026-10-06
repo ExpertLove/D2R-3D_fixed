@@ -1,84 +1,112 @@
-# D2R Third Person — экспериментальная бета
+# D2R Third Person — Experimental Beta
 
-Камера от третьего лица и управление для **Diablo II: Resurrected через D2RLoader**.
+Perspective third-person camera, camera-relative movement and explicit target selection for **Diablo II: Resurrected through D2RLoader**.
 
-**Версия: 1.1.0-experimental.22.** Это плагин загрузчика, не самостоятельный мод и не официальная разработка Blizzard или D2RLoader.
+**Version: 1.1.0-experimental.23.** This is a loader plugin, not a standalone injector. Not affiliated with or endorsed by Blizzard or D2RLoader.
 
-[English](docs/README.en.md) · [Сборка](docs/BUILDING.md) · [Ограничения](docs/KNOWN_ISSUES.md) · [История](CHANGELOG.md) · [Права и авторство](THIRD_PARTY_NOTICES.md)
+[Building](docs/BUILDING.md) · [Known limitations](docs/KNOWN_ISSUES.md) · [Changelog](CHANGELOG.md) · [Credits and permissions](THIRD_PARTY_NOTICES.md)
 
-## Возможности
+## Choose a download
 
-- Перспективная камера, обзор мышью, масштабирование колёсиком.
-- WASD относительно камеры; удержание Shift временно освобождает курсор.
-- Поворот штатной Tab-карты вслед за направлением камеры.
-- Выбор врагов: следующий/предыдущий, элита, небольшая область вокруг центра экрана.
-- Печать под выбранной целью и штатная верхняя панель имени/здоровья.
-- Панель настроек с шестерёнкой, переназначение клавиш, чувствительность, размер области выбора, сохранение настроек.
+| Edition | Included plugins | Recommended for |
+|---|---|---|
+| **Standard** | `d2rl-3dcam.dll` | Normal draw distance; lowest additional overhead |
+| **Extended** | The same camera DLL plus `d2rl-renderdistance.dll` | Optional increased draw distance, controlled from the settings panel |
 
-**Нет постоянного прицела, поворота камеры к цели или автоатаки.** Ручные атаки могут направляться в выбранную цель. Сам выбор не атакует.
+Both editions have identical camera, movement, targeting and key-remapping features. The distance plugin is **optional**, not a camera requirement. Both plugins' sources live in this repository.
 
-## Совместимость и безопасность
+**Extended starts with increased distance OFF on first installation.** The distance switch remembers your choice between launches. **F12 controls the camera only**; it never toggles the updated distance plugin.
 
-Проверялось только на **Windows x64, D2R EXE 3.2.92777, D2RLoader 1.3.1-beta**, SDK0.3.0 / plugin ABI4. Совместимость с другими сборками не заявляется. Native hooks проверяют сигнатуры, но это не универсальная гарантия безопасности.
+Increased distance can cause stuttering, higher memory use and lower FPS. Turn it off if needed. Pools allocated after enabling remain enlarged until the game exits; turning the option off is not guaranteed to immediately recover all memory or FPS. Standard avoids loading the distance plugin altogether.
 
-Предназначено для **офлайн-тестирования**. Работа на Battle.net, отсутствие санкций и совместимость с другими модификациями **не гарантируются**. Начните с тестового персонажа и резервной копии сохранений. Плагин не редактирует сохранения персонажей; сохранение настроек плагина — отдельный INI.
+## Features
 
-## Установка
+- Perspective camera, continuous mouse look and wheel zoom.
+- Eight-way WASD relative to the camera; hold Shift for a free cursor.
+- Camera-aligned native Tab automap.
+- Explicit next/previous, elite and screen-center enemy selection.
+- Animated seal under the selected enemy, with the native name/health panel.
+- In-game settings gear, physical-key remapping, sensitivity and selection-radius controls.
+- Extended only: persisted render-distance switch, independent of the camera.
 
-1. Полностью закройте игру и загрузчик. Не заменяйте DLL во время игры.
-2. Установите совместимый D2RLoader. Игра и загрузчик в этот проект не входят.
-3. Из архива релиза скопируйте **только `d2rl-3dcam.dll`** в `<папка игры>/d2rloader/plugins/`.
-4. Если DLL уже есть, предварительно сохраните её копию **вне** каталога plugins. Не оставляйте там несколько версий camera DLL.
-5. Запустите игру через D2RLoader и войдите офлайн-персонажем.
-6. Нажмите **F12**, затем **F10**. Для движения штатные действия движения игры должны быть назначены на **W/A/S/D**.
+**No permanent crosshair, camera lock, automatic turning or autoattacks.** Manual attacks can aim at the selected target; selecting a target does not attack it.
 
-Отдельный плагин дальности в релиз **не включён**. Если он уже установлен, его штатный F12 может переключать дальность одновременно с камерой.
+## Compatibility and safety
 
-## Настройки и первый выбор цели
+Tested configuration: **Windows x64, D2R EXE 3.2.92777, D2RLoader 1.3.1-beta**, SDK 0.3.0 / plugin ABI 4. Other versions are not guaranteed. Signature checks reject known mismatches but are not a universal safety guarantee.
 
-1. В режиме3D шестерёнка находится **у правого края, немного выше середины экрана** (38% высоты).
-2. В F10 удерживайте **Shift** и нажмите шестерёнку. Затем отпустите Shift: панель сама оставит курсор свободным.
-3. Нажмите **TARGETING: ON**. По умолчанию выбор целей выключен, пока вы его не включите.
-4. Закройте панель крестиком или Escape. **Игра во время настройки не ставится на паузу!** Лучше настраивать управление в городе.
-5. Нажмите **V**, глядя на противника около центра экрана. Если подходящего врага нет, текущая живая цель сохраняется.
+Use this beta for **offline testing** with a disposable character and backed-up saves. Battle.net compatibility, anti-cheat acceptance and account safety are **not guaranteed**. These plugins do not edit character saves. Neither the game nor the loader is included.
 
-Открытая панель блокирует управление движением/обзор и поглощает новые клики и колесо мыши. Открытие панели может сбросить выбранную цель. Потеря фокуса, Alt и Windows освобождают управление; после возвращения может потребоваться F10.
+## Install or upgrade
 
-### Клавиши по умолчанию
+1. Fully close the game and D2RLoader. Never replace a loaded DLL.
+2. Install a compatible D2RLoader separately.
+3. Back up existing plugin DLLs and their INI files **outside** `d2rloader/plugins/`.
+4. Copy the DLL(s) from your chosen archive into `<game>/d2rloader/plugins/`.
+   - **Standard:** install `d2rl-3dcam.dll`. Remove any existing `d2rl-renderdistance.dll` from this directory if you want a genuinely camera-only installation.
+   - **Extended:** install **both matching .23 DLLs**. Replace the older distance DLL; do not keep it under a second filename. The old distance plugin has a different F12 behavior and does not support this panel service.
+5. Launch through D2RLoader and enter an offline game.
+6. Bind the game's native movement actions to **W/A/S/D**. Press **F12** for 3D, then **F10** for mouse look.
 
-| Клавиша | Действие |
+Do not place backup DLLs in the plugins directory: they may be loaded as extra plugins. Existing settings are preserved during an upgrade. Therefore, if distance was previously saved ON, Extended will restore ON rather than reset your preference.
+
+## Open settings and select a target
+
+1. While 3D is enabled, find the small red/gold gear at the **right edge, about 38% down the screen**.
+2. In mouse-look mode, hold **Shift** and click the gear. Release Shift after opening; the panel keeps the cursor free.
+3. Set **TARGETING: ON**. Targeting starts disabled until enabled by you.
+4. Close with X or Escape. Press **V** when an enemy is near the screen center. A miss preserves your current live target.
+
+The panel suspends movement/look and consumes new mouse-button and wheel actions, including clicks outside the panel. **The game does not pause. Configure controls in town.** Opening the panel can clear the selected target. Escape first cancels a pending key assignment; otherwise it closes. Alt/Windows/focus loss release control safely, and F10 may need re-enabling afterwards.
+
+### Extended distance
+
+When the matching distance plugin is present, the panel shows **DISTANCE: OFF/ON** next to the target-seal control. The switch is absent in Standard.
+
+- Click to request ON/OFF. `WAIT ON/OFF` means the request awaits a native client update.
+- The distance plugin applies the change on the game update path and saves it in `d2rloader/plugins/renderdistance-settings.ini`.
+- `N/A` means required native guards failed or a runtime fault disabled the feature. Do not force it; inspect the distance plugin log.
+- `UNSAVED` means a setting was applied but writing the INI failed. Make the plugin directory writable before relying on persistence.
+- Disabling restores the normal visibility radius/depth through native hooks; additional rooms retire on subsequent updates. Already enlarged memory pools are retained until exit.
+- `DEFAULTS` resets **camera-panel settings**, not the separately owned render-distance preference. Use the DISTANCE switch to change it.
+
+The optional console command `renderdist` uses the same queued, persisted setting. No console command is required for normal panel use.
+
+## Default controls
+
+| Input | Action |
 |---|---|
-| F12 | Включить/выключить3D-камеру |
-| F10 | Обзор мышью |
-| F9 | Относительное WASD |
-| Shift (удерживать) | Свободный курсор |
-| Колесо | Приближение/отдаление |
-| Средняя кнопка + движение мыши | Вращение камеры вне F10 |
-| Tab | Штатная карта |
-| F / G | Следующая / предыдущая цель |
-| X | Перебор элитных врагов |
-| V | Выбор врага около центра |
-| Shift + ЛКМ по врагу | Выбор без атаки |
-| Escape / Alt | Освободить управление; Escape закрывает панель |
+| F12 | Toggle 3D camera only |
+| F10 | Toggle continuous mouse look |
+| F9 | Toggle camera-relative WASD |
+| Hold Shift | Temporarily free the cursor |
+| Mouse wheel | Zoom |
+| Middle-button drag | Orbit outside F10 mode |
+| Tab | Native automap |
+| F / G | Next / previous eligible enemy |
+| X | Cycle elite enemies |
+| V | Select an enemy near the center |
+| Shift + left-click on an enemy | Select without attacking |
+| Escape / Alt | Release control; Escape also closes settings |
 
-F/G/X/V требуют включённых **TARGETING,3D и F10**. Удержание клавиши не перебирает цели повторно.
+F/G/X/V require **TARGETING + 3D + F10**. Held keys do not repeatedly cycle targets.
 
-В панели нажмите поле клавиши и затем новую кнопку. Используются физические позиции клавиш независимо от языка ввода. Поддерживаются **одиночные клавиши**, не сочетания с Ctrl/Alt/Shift. WASD, Shift и служебные клавиши интерфейса зарезервированы. Дубли внутри плагина отклоняются; конфликты со штатными назначениями игры не проверяются. Переназначение камеры не меняет горячие клавиши других плагинов.
+Click a key field, release modifiers and press a new key. Bindings use physical keyboard positions regardless of input language. **Single keys only**, not Ctrl/Alt/Shift chords. WASD, Shift and native UI safety keys are reserved. Internal duplicates are rejected; conflicts with the game's or other plugins' bindings are not detected.
 
-Настройки сохраняются автоматически в `d2rloader/plugins/3dcam-settings.ini`. **DEFAULTS** возвращает стандартные назначения и параметры. Чувствительность100% сохраняет базовое поведение камеры; область выбора по умолчанию — круг радиусом9% высоты экрана. Панель пока на английском языке.
+Camera settings are saved automatically to `d2rloader/plugins/3dcam-settings.ini`. Missing/invalid bindings fall back to defaults. Sensitivity 100% preserves the base camera behavior. Default center-selection radius is 9% of viewport height, adjustable from 3% to 18%.
 
-Консольные команды: `3dcam`, `clickaim`, `mapfollow`. Прямые console-toggle — на текущую сессию; состояние TARGETING/MAP FOLLOW сохраняется при изменении через панель.
+Optional camera console commands: `3dcam`, `clickaim`, `mapfollow`. Direct camera console toggles are session-local; TARGETING/MAP FOLLOW changes through the panel persist. Distance has its own persisted state and never depends on the camera's F12 toggle.
 
-## Удаление / откат
+## Remove, switch editions or roll back
 
-Закройте игру. Уберите `d2rl-3dcam.dll` из plugins либо восстановите прежнюю DLL. При необходимости удалите `3dcam-settings.ini` для сброса настроек. Сохранения персонажей удалять не нужно. Не оставляйте резервные DLL в каталоге plugins.
+Close the game. Remove the relevant DLL(s) or restore matching backups. To switch Extended to Standard, remove the distance DLL; its INI may be kept so reinstalling Extended restores your preference. Delete `renderdistance-settings.ini` only if you want distance to start OFF again. Delete `3dcam-settings.ini` only to reset camera settings. Do not delete character saves.
 
-## Статус проверки
+## Validation and bug reports
 
-12 автоматизированных наборов тестов проходят. Автор тестовой установки сообщил, что базово всё работает. Это **не** полная проверка всех разрешений, длительных сессий, FPS, склонов, комбинаций модов и перепривязок клавиш. Подробнее: [KNOWN_ISSUES](docs/KNOWN_ISSUES.md).
+Thirteen automated test suites cover selection, input policies, native-adapter mocks, geometry, settings, distance persistence and the optional inter-plugin service. The previous .22 camera received basic local gameplay acceptance. **The .23 distance integration still needs wider gameplay, restart, performance and edition-switching validation.** CI configuration is provided, but a remote GitHub Actions run is not claimed until it actually runs.
 
-Для сообщения об ошибке укажите версию игры/загрузчика/плагина, разрешение и масштаб Windows, последовательность действий, скриншот и очищенный от личных данных фрагмент `d2rloader/logs/d2r-3d-3dcam.log`. Не публикуйте сохранения, полные дампы памяти, токены или файлы игры.
+When reporting a bug, include plugin/game/loader versions, edition, resolution/DPI, other plugins, reproduction steps, screenshot and a sanitized excerpt of `d2rloader/logs/d2r-3d-3dcam.log` or `d2r-3d-renderdistance.log`. **Do not upload savegames, game binaries, memory dumps, passwords or tokens.**
 
-## Авторство
+## Credits
 
-Основано на [emmericp/D2R-3D](https://github.com/emmericp/D2R-3D) (Tandanu). SDK — [D2RLoader/PluginSDK](https://github.com/D2RLoader/PluginSDK). Авторство исходной камеры сохраняется; управление, выбор целей и панель добавлены в этой экспериментальной ветке. Условия компонентов описаны в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Based on [emmericp/D2R-3D](https://github.com/emmericp/D2R-3D), original camera/distance attribution **Tandanu**. SDK: [D2RLoader/PluginSDK](https://github.com/D2RLoader/PluginSDK). This branch adds camera-relative controls, selection, settings and optional distance integration. See [third-party notices](THIRD_PARTY_NOTICES.md) for component permissions; the SDK's MIT license is not a blanket license for all source or artwork.

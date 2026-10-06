@@ -15,6 +15,9 @@
 
 #include <D2RLPlugin/context.h>
 #include <D2RLPlugin/lifecycle.h>
+#include <D2RLPlugin/plugin_communication.h>
+#include "distance_control.h"
+#include "distance_settings.h"
 
 using namespace D2RL;
 
@@ -61,6 +64,10 @@ std::atomic<bool> g_depthApplied{false};
 std::atomic<int> g_nativeDepth{-1};      // mgr+0x1E34 before we changed it
 bool g_buildOk = false, g_mvOk = false, g_playerRoomOk = false;
 std::atomic<bool> g_buildFault{false};
+distance_control::State g_control;
+std::wstring g_settingsPath;
+void ApplyPending();
+bool SafeApply(bool on);
 
 // Room loading
 using ActTestFn = char (*)(uintptr_t mgr, uintptr_t room, float* box1, float* box2);
@@ -68,7 +75,10 @@ ActTestFn OrigActTest;
 
 char HookActTest(uintptr_t mgr, uintptr_t room, float* box1, float* box2) {
     const char r = OrigActTest(mgr, room, box1, box2);
-    g_roomMgr.store(mgr);
+    if(g_roomMgr.exchange(mgr)!=mgr) {
+        // Never restore an old manager's depth into a new game's room manager.
+        g_depthApplied.store(false);g_nativeDepth.store(-1);
+    }
     int& depth = *(int*)(mgr + MGR_ACTDEPTH);
     if (!g_enabled.load()) {
         if (g_depthApplied.exchange(false)) {
@@ -170,8 +180,10 @@ int SehRoomBuilderPass(uint8_t ctx, uintptr_t drlg) {
 
 void HookDrlgUpdate(uint8_t ctx, uintptr_t drlg) {
     OrigDrlgUpdate(ctx, drlg);
+    // Client update only. Panel/console callbacks never touch game pools/rooms.
+    if(g_control.pending(g_control.ticket()) && drlg && (rd<uint32_t>(drlg+D_FLAGS)&1)) ApplyPending();
     if ((!g_enabled.load() && g_owned.empty()) || !g_buildOk || g_buildFault.load()) return;
-    if (!SehRoomBuilderPass(ctx, drlg)) { g_buildFault.store(true); Log("renderdist: fault in the room builder - room building disabled"); }
+    if (!SehRoomBuilderPass(ctx, drlg)) { g_buildFault.store(true);SafeApply(false);g_enabled.store(false);g_control.fault(); Log("renderdist: room builder fault; distance disabled, restart recommended"); }
 }
 
 // Grow the fixed TLSF pools by adding extra pools under their own lock, the way
@@ -207,59 +219,68 @@ bool g_poolsGrown = false;
 int g_rpoolMB = -1, g_epoolMB = -1;
 SRWLOCK g_toggleLock = SRWLOCK_INIT;
 
-// Returns the message to show.
-const char* Toggle() {
-    static char msg[300];
-    AcquireSRWLockExclusive(&g_toggleLock);
-    const bool on = !g_enabled.load();
+// Called only by the native client-update hook, never the input/UI thread.
+bool ApplyNative(bool on) {
     if (on && !g_poolsGrown) {
         g_rpoolMB = GrowPool(RVA_RPOOL_OBJ, 0xC00000, kRenderPoolMB);
         g_epoolMB = GrowPool(RVA_EPOOL_OBJ, 0x4600000, kEntityPoolMB);
-        g_poolsGrown = true;
+        g_poolsGrown = g_rpoolMB==kRenderPoolMB-12 && g_epoolMB==kEntityPoolMB-70;
+        if(!g_poolsGrown) { Log("renderdist: pool growth incomplete; refusing extended distance");return false; }
     }
     if (g_mvOk) ((void (*)(float))(g_base + RVA_MVRADIUS_SET))(on ? kMvRadius : 150.0f);
     g_enabled.store(on);
-    if (on)
-        snprintf(msg, sizeof msg, "renderdist ON: +%d room rings%s, all candidate rooms render, model radius %.0f%s, renderer pool %d MB, entity pool %d MB",
-                 kBuildRings, g_buildOk ? "" : " (UNAVAILABLE)", g_mvOk ? kMvRadius : 150.0f, g_mvOk ? "" : " (setter not found)",
-                 g_rpoolMB > 0 ? 12 + g_rpoolMB : 12, g_epoolMB > 0 ? 70 + g_epoolMB : 70);
-    else
-        snprintf(msg, sizeof msg, "renderdist OFF (built rooms are released as you move; memory pools stay grown)");
-    ReleaseSRWLockExclusive(&g_toggleLock);
-    return msg;
+    Log(on?"renderdist ON: extended room visibility/building; performance cost expected":
+        "renderdist OFF: native radius/depth restored by hooks; extra rooms retire on updates, pools remain grown until exit");
+    return true;
 }
 
+bool SafeApply(bool on) {
+    __try { return ApplyNative(on); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+void ApplyPending() {
+    // Shared DRLG entry may be reached from several contexts; serialize application.
+    if(!TryAcquireSRWLockExclusive(&g_toggleLock)) return;
+    const auto ticket=g_control.ticket();
+    if(g_control.pending(ticket)) {
+        const bool on=distance_control::State::desired(ticket);
+        if(SafeApply(on)) {
+            const bool saved=distance_control::SaveSetting(g_settingsPath,on);
+            g_control.complete(ticket,saved);
+            if(!saved) Log("renderdist: setting active but INI save failed");
+        } else { g_enabled.store(false);g_control.fault();Log("renderdist: native update failed; disabled until restart"); }
+    }
+    ReleaseSRWLockExclusive(&g_toggleLock);
+}
+std::uint32_t __cdecl GetControlState() noexcept { return g_control.flags(); }
+std::uint32_t __cdecl SetControlState(std::uint32_t on) noexcept { return on<=1 && g_control.request(on!=0); }
+const distance_control::Api g_api{sizeof(distance_control::Api),distance_control::Version,&GetControlState,&SetControlState};
+
 ConsoleCommandResult __cdecl CmdRenderDist(D2R::Game::Client*, const ConsoleCommandContext*, void*) noexcept {
-    Say(Toggle());
+    const bool on=(g_control.flags()&distance_control::Requested)==0;
+    Say(g_control.request(on)?(on?"renderdist ON requested; applies/saves on next client update":"renderdist OFF requested; applies/saves on next client update"):
+        "renderdist unavailable: native guards or runtime fault; see log");
     return ConsoleCommandResult::Handled;
 }
 
-// F12 polling. Runs outside the game thread, so it only logs.
-std::atomic<bool> g_quit{false};
-
-DWORD WINAPI KeyThread(void*) {
-    for (bool f12Was = false; !g_quit.load(); Sleep(10)) {
-        DWORD pid = 0; GetWindowThreadProcessId(GetForegroundWindow(), &pid);
-        const bool f12 = pid == GetCurrentProcessId() && (GetAsyncKeyState(VK_F12) & 0x8000);
-        if (f12 && !f12Was) Log(Toggle());
-        f12Was = f12;
-    }
-    return 0;
-}
+// No hotkey/polling thread: F12 belongs exclusively to the camera plugin.
 
 }  // namespace
 
 static const PluginInfo g_info = {
-    PluginInfoSize, D2RL_PLUGIN_ABI_VERSION, "d2r-3d-renderdistance", "renderdistance", "1.0.0", "Tandanu",
-    "Extended render distance: builds and renders far rooms and their models. Press F12 to enable.",
+    PluginInfoSize, D2RL_PLUGIN_ABI_VERSION, "d2r-3d-renderdistance", "renderdistance", "1.1.0-experimental.23", "Tandanu",
+    "Optional extended render distance. Toggle via the camera settings panel or renderdist; choice persists, default OFF. No F12 binding.",
     PluginFlags::Shared | PluginFlags::NativeHooks, {0, 0, 0, 0},
 };
 
 D2RL_PLUGIN_EXPORT const PluginInfo* D2RLoaderGetPluginInfo() noexcept { return &g_info; }
 
 D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
+    if(!HasContext(ctx) || !ctx->GetApi()) return false;
     g_ctx = ctx;
-    if (!ctx) return true;
+    HMODULE module=nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(&CmdRenderDist),&module);
+    if(module) g_settingsPath=distance_control::SettingsPath(module);
     g_base = ctx->exeBase ? ctx->exeBase : (uintptr_t)GetModuleHandleW(nullptr);
     const bool hAct = ctx->InstallInlineHook(RVA_ACTTEST, kSigActTest, sizeof kSigActTest, (void*)&HookActTest, (void**)&OrigActTest);
     const bool hUpd = ctx->InstallInlineHook(RVA_DRLG_UPDATE, kSigDrlgUpdate, sizeof kSigDrlgUpdate, (void*)&HookDrlgUpdate, (void**)&OrigDrlgUpdate);
@@ -270,13 +291,20 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     snprintf(b, sizeof b, "renderdistance loaded: actTest=%s drlgUpdate=%s roomBuilder=%s playerRoom=%s mvRadiusSetter=%s",
              hAct ? "ok" : "FAIL", hUpd ? "ok" : "FAIL", g_buildOk ? "ok" : "FAIL", g_playerRoomOk ? "ok" : "FAIL", g_mvOk ? "ok" : "FAIL");
     ctx->LogInfo(b);
-    if (HANDLE h = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr)) CloseHandle(h);
-    if (!ctx->RegisterConsoleCommand("renderdist", &CmdRenderDist, "renderdist - switch the extended render distance on/off (also F12)")) ctx->LogError("renderdist: could not register the console command");
+    g_control.support(hAct && g_buildOk && g_playerRoomOk && g_mvOk);
+    if(distance_control::LoadSetting(g_settingsPath)) g_control.request(true);
+    const PluginCommunicationService* communication=nullptr;
+    if(ctx->QueryService(&communication)==ServiceQueryResult::Success && HasPluginCommunicationServiceField(communication,PluginCommunicationServiceRequiredSize) && communication->publishService) {
+        const PluginCommunication::PublishServiceRequest request{sizeof(PluginCommunication::PublishServiceRequest),0,distance_control::ServiceName,distance_control::Version,sizeof(g_api),&g_api};
+        if(communication->publishService(ctx,&request)!=PluginCommunication::Result::Success) ctx->LogWarn("renderdist: could not publish panel control service");
+        else ctx->LogInfo("renderdist: panel service ready; default OFF, saved choice restored on client update; no F12 hotkey");
+    } else ctx->LogWarn("renderdist: communication service unavailable; console control only");
+    if (!ctx->RegisterConsoleCommand("renderdist", &CmdRenderDist, "renderdist - toggle and save extended render distance (no hotkey)")) ctx->LogError("renderdist: could not register the console command");
     return true;
 }
 
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
-    g_quit.store(true);
+    g_control.support(false);
     g_enabled.store(false);
     g_ctx = nullptr;
 }

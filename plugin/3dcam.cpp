@@ -34,6 +34,7 @@
 #include "marker_frame.h"
 #include "center_target.h"
 #include "settings_ui.h"
+#include "distance_client.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -475,8 +476,8 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM message, LPARAM data) {
         else if(action==camera_settings::Movement) g_relativeMovement=!g_relativeMovement;
         else if(action==camera_settings::Camera && g_ctx) g_ctx->LogInfo(Toggle());
     }
-    // Preserve default F12 passthrough: the separate renderdistance plugin polls it.
-    if(choice.consume && !(action==camera_settings::Camera && physical==0x58)) return 1;
+    // All camera hotkeys are owned pairs. Distance has no F12 binding.
+    if(choice.consume) return 1;
     if (down && GameFocused()) for (int releaseKey : kReleaseKeys)
         if (key->vkCode==unsigned(releaseKey)) {
             g_freeLook.store(false);
@@ -657,6 +658,9 @@ bool SettingsMouse(WPARAM message,const MSLLHOOKSTRUCT& ms) {
                 case 106: c.radius=std::max(3u,c.radius-1);changed=true;break;
                 case 107: c.radius=std::min(18u,c.radius+1);changed=true;break;
                 case 108: c={};click_aim::enabled.store(false);click_aim::Invalidate();camera_automap::enabled.store(true);camera_automap::Invalidate();changed=true;break;
+                case 109: if(distance_control::client.flags.load()&distance_control::Present) {
+                    if(!distance_control::client.toggle() && g_ctx) g_ctx->LogWarn("settings: render distance control unavailable; see distance plugin log");
+                } break;
             }
             if(changed) { camera_settings::Set(c);g_settingsDirty=true; }
         }
@@ -736,7 +740,7 @@ bool BuildTargetRing(unsigned width,unsigned height,target_ring::Batch& batch) {
         ReleaseSRWLockShared(&g_camLock);
         if(valid) target_ring::Build(camera,target.x,target.z,width,height,batch,std::uint32_t(GetTickCount64()));
     }
-    camera_settings::Draw(batch,click_aim::enabled.load(),camera_automap::enabled.load());
+    camera_settings::Draw(batch,click_aim::enabled.load(),camera_automap::enabled.load(),distance_control::client.flags.load());
     return batch.count>0;
 }
 
@@ -750,7 +754,8 @@ ConsoleCommandResult __cdecl CmdMapFollow(D2R::Game::Client*, const ConsoleComma
     return ConsoleCommandResult::Handled;
 }
 
-// Mouse hook + F12 polling. F12 runs outside the game thread, so it only logs.
+// Input hooks, capture updates and optional distance-service polling.
+// Keyboard actions never call distance native functions directly.
 DWORD WINAPI MouseThread(void*) {
     g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseProc, g_self, 0);
     g_keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardProc, g_self, 0);
@@ -772,9 +777,16 @@ DWORD WINAPI MouseThread(void*) {
         g_mouseHook = nullptr;
         return 0;
     }
+    ULONGLONG distancePoll=0;
     MSG m;
     while (!g_quit.load() && GetMessageW(&m, nullptr, 0, 0) > 0) {
         if (m.message == WM_TIMER) {
+            if(GetTickCount64()-distancePoll>=250) {
+                const auto before=distance_control::client.flags.load();
+                distance_control::client.poll(g_ctx);distancePoll=GetTickCount64();
+                if(!(before&distance_control::Present) && (distance_control::client.flags.load()&distance_control::Present) && g_ctx)
+                    g_ctx->LogInfo("settings: optional render distance service connected; F12 controls camera only");
+            }
             if(g_settingsDirty) {
                 g_settingsDirty=false;
                 if(!camera_settings::Save() && g_ctx) g_ctx->LogError("settings: could not atomically save 3dcam-settings.ini");
@@ -793,6 +805,7 @@ DWORD WINAPI MouseThread(void*) {
         }
         DispatchMessageW(&m);
     }
+    distance_control::client.close(); // release loader lease before provider may unload
     SetMovementKeys(0);
     if (g_keyboardHook) UnhookWindowsHookEx(g_keyboardHook);
     g_keyboardHook = nullptr;
@@ -805,7 +818,7 @@ DWORD WINAPI MouseThread(void*) {
 }  // namespace
 
 static const PluginInfo g_info = {
-    PluginInfoSize, D2RL_PLUGIN_ABI_VERSION, "d2r-3d-3dcam", "3dcam", "1.1.0-experimental.22", "Tandanu",
+    PluginInfoSize, D2RL_PLUGIN_ABI_VERSION, "d2r-3d-3dcam", "3dcam", "1.1.0-experimental.23", "Tandanu",
     "Perspective camera, camera-relative WASD, Shift cursor and experimental heading-up Tab map. F12 camera, F10 mouse look.",
     PluginFlags::Shared | PluginFlags::NativeHooks, {0, 0, 0, 0},
 };
@@ -848,7 +861,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     click_aim::enabled.store(saved.targeting && click_aim::ready.load());
     camera_automap::enabled.store(saved.mapFollow);
     // No automatic selection, target steering or passive relation hook.
-    ctx->LogInfo("3dcam .22: original loader cog (frameless) + configurable keys + V center selection; clickaim opt-in (saved panel setting); no camera tracking");
+    ctx->LogInfo("3dcam .23: optional persisted render distance via leased service; F12 camera only; settings + V selection; clickaim opt-in");
     ctx->LogInfo(g_lifecycleOk ? "3dcam: F10 mouse look + experimental camera-relative WASD; native WASD bindings required" : "3dcam: lifecycle unavailable; F10 disabled");
     g_mouseThread = CreateThread(nullptr, 0, MouseThread, nullptr, 0, &g_mouseThreadId);
     if (!g_mouseThread) { ctx->LogError("3dcam: input thread failed"); return false; }

@@ -77,6 +77,14 @@ int main() {
         CHECK(l.hit(l.x+500*l.scale,l.y+20*l.scale)==100);
         std::printf("UI %ux%u: %u quads\n",b.width,b.height,b.count-start);
     }
+    // Extended-only button: hidden for Standard, bounded for every status label.
+    for(unsigned flags:{unsigned(distance_control::Present), unsigned(distance_control::Present|distance_control::Supported),
+        unsigned(distance_control::Present|distance_control::Supported|distance_control::Pending|distance_control::Requested),
+        unsigned(distance_control::Present|distance_control::Supported|distance_control::SaveFailed)}) {
+        target_ring::Batch extended;extended.width=1280;extended.height=720;extended.count=target_ring::SealQuads;
+        Draw(extended,true,true,flags);CHECK(extended.count<target_ring::MaxQuads-100);
+        Layout l(1280,720);CHECK(l.hit(l.x+300*l.scale,l.y+330*l.scale)==109);
+    }
     Close();target_ring::Batch gear;gear.width=1280;gear.height=720;Draw(gear,false,false);CHECK(gear.count>100 && gear.count<=GearSize*GearSize && waiting==-1);
     CHECK(GearPixels[0]!=0); // original cropped red face, no enclosing procedural frame
     // Settings persistence uses only a disposable temp file, never game saves.
