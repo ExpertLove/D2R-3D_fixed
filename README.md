@@ -4,6 +4,20 @@
 > **Tested ONLY with Diablo II: Resurrected EXE version 3.2.92777 and D2RLoader 1.3.1-beta on Windows x64.**
 > Compatibility with any other game or loader version is **not guaranteed**. Intended for **offline testing**; Battle.net compatibility and account safety are not guaranteed.
 
+## Download — ready to install
+
+### [⬇ Download Standard — recommended](https://github.com/ExpertLove/D2R-3D_fixed/releases/download/v1.1.0-experimental.23/d2r-third-person-1.1.0-experimental.23-standard-windows-x64.zip)
+Camera, movement, targeting and settings. **No increased draw distance.**
+
+### [⬇ Download Extended — optional increased draw distance](https://github.com/ExpertLove/D2R-3D_fixed/releases/download/v1.1.0-experimental.23/d2r-third-person-1.1.0-experimental.23-extended-windows-x64.zip)
+Everything in Standard, plus the separately switchable distance plugin. Higher performance cost when enabled.
+
+**These ZIPs contain the ready-to-use DLLs. You do not need to build anything.** Do not use **Code → Download ZIP** or **Source code** to install the plugin; those downloads are for developers.
+
+[Release page, checksums and source downloads](https://github.com/ExpertLove/D2R-3D_fixed/releases/tag/v1.1.0-experimental.23) · [Installation instructions](#install-or-upgrade)
+
+---
+
 Perspective third-person camera, camera-relative movement and explicit target selection for **Diablo II: Resurrected through D2RLoader**.
 
 **Version: 1.1.0-experimental.23.** This is a loader plugin, not a standalone injector. Not affiliated with or endorsed by Blizzard or D2RLoader.
