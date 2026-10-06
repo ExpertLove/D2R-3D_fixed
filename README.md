@@ -1,5 +1,9 @@
 # D2R Third Person — Experimental Beta
 
+> [!IMPORTANT]
+> **Tested ONLY with Diablo II: Resurrected EXE version 3.2.92777 and D2RLoader 1.3.1-beta on Windows x64.**
+> Compatibility with any other game or loader version is **not guaranteed**. Intended for **offline testing**; Battle.net compatibility and account safety are not guaranteed.
+
 Perspective third-person camera, camera-relative movement and explicit target selection for **Diablo II: Resurrected through D2RLoader**.
 
 **Version: 1.1.0-experimental.23.** This is a loader plugin, not a standalone injector. Not affiliated with or endorsed by Blizzard or D2RLoader.
