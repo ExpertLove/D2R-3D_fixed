@@ -1,0 +1,8 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "sdk",
+    hdrs = glob(["include/D2RLPlugin/*.h"]),
+    includes = ["include"],
+    visibility = ["//plugin:__pkg__"],
+)

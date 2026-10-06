@@ -1,0 +1,116 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//tools:windows_resource.bzl", "windows_resource")
+
+windows_resource(
+    name = "plugin_manifest",
+    src = "plugin.rc",
+    deps = ["//plugin/third_party/sdk:sdk"],
+)
+
+[cc_binary(
+    name = "d2rl-%s.dll" % plugin,
+    srcs = ["%s.cpp" % plugin, "center_target.h", "settings_model.h", "settings_ui.h", "loader_gear_pixels.h", "marker_frame.h", "elite_target.h", "target_health.h", "target_ring_runtime.h", "target_ring.h", "nearest_target.h", "target_key.h", "movement_math.h", "cursor_hold.h", "automap_runtime.h", "automap_math.h", "automap_packets.h", "click_target_runtime.h", "click_target_native.h", "click_target.h", "target_runtime.h", "target_provider.h", "target_selection.h", "target_world.h"],
+    copts = [
+        "/utf-8",
+        "/W3",
+        "/EHsc",
+        "/permissive-",
+    ],
+    linkopts = ["user32.lib"],
+    linkshared = True,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":plugin_manifest",
+        "//plugin/third_party/sdk:sdk",
+    ],
+) for plugin in [
+    "3dcam",
+    "renderdistance",
+]]
+
+cc_test(
+    name = "settings_center_test",
+    srcs = ["settings_center_test.cpp", "settings_ui.h", "loader_gear_pixels.h", "settings_model.h", "center_target.h", "target_key.h", "nearest_target.h", "target_provider.h", "target_selection.h", "target_world.h", "target_ring.h", "automap_math.h"],
+    copts = ["/EHsc"],
+    linkopts = ["user32.lib"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "automap_test",
+    srcs = ["automap_test.cpp", "automap_math.h", "automap_packets.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "nearest_ring_test",
+    srcs = ["nearest_ring_test.cpp", "marker_frame.h", "nearest_target.h", "target_provider.h", "target_selection.h", "target_world.h", "target_ring.h", "automap_math.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "target_ring_runtime_test",
+    srcs = ["target_ring_runtime_test.cpp", "target_ring_runtime.h", "target_ring.h", "automap_runtime.h", "automap_packets.h", "automap_math.h"],
+    copts = ["/EHsc"],
+    deps = ["//plugin/third_party/sdk:sdk"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "click_target_runtime_test",
+    srcs = ["click_target_runtime_test.cpp", "elite_target.h", "target_health.h", "nearest_target.h", "target_key.h", "click_target_runtime.h", "click_target_native.h", "click_target.h", "target_runtime.h", "target_provider.h", "target_selection.h", "target_world.h"],
+    copts = ["/EHsc"],
+    linkopts = ["user32.lib"],
+    deps = ["//plugin/third_party/sdk:sdk"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "click_target_native_test",
+    srcs = ["click_target_native_test.cpp", "click_target_native.h", "click_target.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "click_target_test",
+    srcs = ["click_target_test.cpp", "click_target.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "cursor_hold_test",
+    srcs = ["cursor_hold_test.cpp", "cursor_hold.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "movement_math_test",
+    srcs = ["movement_math_test.cpp", "movement_math.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "target_selection_test",
+    srcs = ["target_selection_test.cpp", "target_selection.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "target_provider_test",
+    srcs = ["target_provider_test.cpp", "target_provider.h", "target_runtime.h", "target_selection.h", "target_world.h"],
+    copts = ["/EHsc"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_binary(
+    name = "target_snapshot_probe",
+    srcs = ["target_snapshot_probe.cpp", "target_provider.h", "target_selection.h", "target_world.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_test(
+    name = "target_world_test",
+    srcs = ["target_world_test.cpp", "target_world.h", "target_tracking.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)

@@ -1,0 +1,5 @@
+# Windows x64 / MSVC. Camera DLL goes into <game>/d2rloader/plugins/.
+build --compilation_mode=opt
+build --features=static_link_msvcrt
+build --features=-default_cpp_std
+build --cxxopt=/std:c++20

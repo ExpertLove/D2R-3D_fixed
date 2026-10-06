@@ -1,0 +1,27 @@
+name: Windows build and tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Bazelisk
+        shell: pwsh
+        run: Invoke-WebRequest 'https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-windows-amd64.exe' -OutFile bazelisk.exe
+      - name: Build and test
+        shell: pwsh
+        run: .\bazelisk.exe --batch test //plugin/... --nocache_test_results --test_output=errors
+      - name: Package camera plugin
+        shell: pwsh
+        run: python tools/package_release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: experimental-camera-windows-x64
+          path: dist/*
+          if-no-files-found: error
