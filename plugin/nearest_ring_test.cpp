@@ -21,7 +21,7 @@ int main() {
     f.units[0].x=3;f.units[0].key.session=2;CHECK(!click_target::Nearest(f).found);
     f.units[0].key.session=1;f.units[0].key.id=UINT32_MAX;CHECK(!click_target::Nearest(f).found);
     CHECK(!click_target::Nearest(f,-1).complete);
-    f.count=129;CHECK(!click_target::Nearest(f).complete);
+    f.count=uint32_t(f.units.size())+1;CHECK(!click_target::Nearest(f).complete);
     f.count=3;f.complete=false;CHECK(!click_target::Nearest(f).complete);
 
     // Cycle: nearest first, stable order, wrap, no A-B ping-pong, prune/append.

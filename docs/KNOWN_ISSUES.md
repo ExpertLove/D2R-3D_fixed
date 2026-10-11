@@ -12,10 +12,15 @@
 - Extended distance increases room-building/visibility work and can cause stuttering or high memory usage. OFF restores normal visibility through hooks and retires additional rooms over later updates, but enlarged pools remain until process exit. Switching OFF is not a guarantee of immediate memory or FPS recovery.
 - Distance defaults OFF only when no enabled preference exists. Its INI is owned by the distance plugin and survives switching editions. Changes/restoration wait for a native client update; the panel reports pending, unavailable and save-failure states. Avoid exiting while a change is still pending.
 - Camera-to-distance communication requires the SDK PluginCommunication service. If unavailable, the camera remains usable and the distance console command is the fallback. No guessed cross-DLL pointers or automatic loading of arbitrary plugins are used.
-- Cog pixels are rendered as native solid-quad rows instead of a new unverified texture API. The gear uses1004 quads, an open panel3016 quads (capacity4096). Visual fidelity and FPS overhead vary; report regressions. The cog is derived from original loader artwork with its surrounding frame removed.
+- Cog pixels are rendered as native solid-quad rows instead of a new unverified texture API. The gear uses about 1000 quads and is hidden while mouse look owns the cursor; an open panel uses about 2360 quads including the gear (capacity 4096). Visual fidelity and FPS overhead vary; report regressions. The cog is derived from original loader artwork with its surrounding frame removed.
+- F11 (view presets) is a new default. If the game or another plugin uses F11, rebind or clear it (Backspace) in the panel. Hotkeys are consumed only while 3D is on in a game.
+- Shoulder offset, field of view and presets change only the plugin's perspective. Mouse picking, the seal, center selection and relative WASD use the same live matrices, but every combination has not been verified in gameplay. The lowest pitch is limited so the camera stays above the player's ground level.
+- The off-screen arrow uses the same approximate ground height as the seal; it indicates a screen direction, not a walkable path. It is shown only while TARGET SEAL is on.
+- On-screen confirmations use the plugin's pixel font (English capitals). They are not shown while the 3D camera is off.
+- In very dense areas only the 256 nearest monsters are considered for F/G/X/V; farther ones are ignored rather than disabling targeting.
 - .23 introduces queued native-thread distance application and cross-plugin control. Tests cover state/lease/persistence contracts but do not prove actual room/pool behavior across acts, teleports, long sessions or plugin unloads. Wider gameplay verification is required.
 - CPU geometry previews and successful native upload counters are not proof of on-screen pixels. .20 had reversed settings-rectangle winding despite passing geometry bounds checks; .21 corrected order and added a regression test. The .22 user reported basic operation, not exhaustive validation.
-- Config file must be writable beside the DLL. `SAVE FAILED` means settings changed for this session but were not persisted. Missing or invalid binding config falls back to defaults.
+- Config file must be writable beside the DLL. `SAVE FAILED` means settings changed for this session but were not persisted. Missing values use defaults; an invalid or conflicting value is repaired individually (`RESERVED KEY OR CONFLICT` is shown once) while other settings are kept. Zoom/pitch are saved a few seconds after the last change and when leaving a game.
 - Failure to install target UI hooks disables targeting rather than silently selecting without its required UI support. Check the plugin log for hook failures.
 
 ## Minimal manual acceptance checklist
@@ -24,7 +29,11 @@
 - Gear and panel appear and match click coordinates at your resolution/DPI.
 - Panel clicks/wheel do not attack or move; held movement releases correctly; Escape/X/Alt-Tab release safely.
 - V selects only an eligible enemy near center; miss preserves a live selection. F/G/X and Shift-click remain functional.
-- Assign an unused key, reject duplicates/reserved keys, restart and confirm persistence, then test DEFAULTS.
+- Assign an unused key, reject duplicates/reserved keys, clear one with Backspace, restart and confirm persistence, then test DEFAULTS.
+- .24: F11 cycles CLASSIC/CLOSE/TACTICAL smoothly; SHOULDER RIGHT/LEFT, FOV and INVERT Y behave as labelled; mouse clicks still hit what is under the cursor with shoulder/FOV changes.
+- .24: select an enemy (F), turn away until it is behind you: an edge arrow appears and points toward it; turning back shows the seal again.
+- .24: wheel zoom is smooth (also with a touchpad); zoom/pitch are restored after restarting the game.
+- .24: targeting still works in a dense area (Cow Level or a large pack); FPS with no target selected is not lower than .23.
 - Check FPS with panel open/closed, several teleports, slopes and a longer session.
 - Standard: no DISTANCE button; Extended: button present, first launch OFF. Toggle ON/OFF, verify native behavior and logs, restart after each completed change and verify restoration.
 - F12 must toggle only the camera while distance remains unchanged. Check this with both ON and OFF saved.

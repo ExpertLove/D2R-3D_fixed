@@ -19,6 +19,9 @@ inline std::atomic<std::uint64_t> epoch{1};
 inline std::atomic<unsigned> selections{0}, aims{0}, visuals{0}, failures{0};
 inline std::atomic<unsigned> nameVisuals{0}, glowVisuals{0}, foreignVisuals{0};
 inline std::atomic<unsigned> searches{0},noTarget{0};
+// Optional on-screen feedback (thread-safe sink owned by the camera plugin).
+inline void(*notify)(const char*)=nullptr;
+inline void Notify(const char* text) { if(notify) notify(text); }
 struct SelectionIntent { std::uint64_t serial=0,session=0; ULONGLONG at=0; int direction=1; bool elite=false,center=false; };
 inline SRWLOCK intentLock=SRWLOCK_INIT;
 inline std::array<SelectionIntent,64> intents{};
@@ -237,7 +240,10 @@ inline void __fastcall PickUpdate(unsigned slot) {
     const auto finder=intent.center?centerFinder:intent.elite?eliteFinder:nearestFinder;
     const auto result=finder?finder(player,c.session):NearestResult{};
     // Explicit center/elite misses preserve current selection.
-    if((intent.center || intent.elite) && (!result.complete || !result.found)) { ++noTarget; continue; }
+    if((intent.center || intent.elite) && (!result.complete || !result.found)) {
+        ++noTarget; Notify(intent.center?"NO TARGET IN VIEW":"NO ELITE NEARBY"); continue;
+    }
+    if(result.complete && !result.found) Notify("NO TARGET NEARBY");
     Pick pick{PickKind::NonMonster,{}};
     if(result.complete && result.found) {
         const auto unit=resolve(result.id,1); // provider generation is NOT an attack handle
@@ -388,11 +394,12 @@ inline bool Install(const D2RL::PluginContext* ctx,std::uintptr_t image,bool(*ga
         std::memcpy(&displacement,bytes+1,4);
         return base+ret+displacement==base+target;
     };
-    for(auto ret:requestReturns) if(!callMatches(ret,0xfe3b0)) return false;
-    for(auto ret:getterReturns) if(!callMatches(ret,0xf1900)) return false;
-    if(!callMatches(0x784fb0,0x9b7d0)) return false;
+    const auto reject=[&](const char* why) { ctx->LogWarn(why); return false; };
+    for(auto ret:requestReturns) if(!callMatches(ret,0xfe3b0)) return reject("clickaim: action callsite guard failed; feature unavailable");
+    for(auto ret:getterReturns) if(!callMatches(ret,0xf1900)) return reject("clickaim: target getter callsite guard failed; feature unavailable");
+    if(!callMatches(0x784fb0,0x9b7d0)) return reject("clickaim: highlight callsite guard failed; feature unavailable");
     unsigned char picker[8]{};
-    if(!memory(base+0xf1cc0,picker,8) || std::memcmp(picker,"\x48\x8b\xc4\x89\x48\x08\x55\x53",8)) return false;
+    if(!memory(base+0xf1cc0,picker,8) || std::memcmp(picker,"\x48\x8b\xc4\x89\x48\x08\x55\x53",8)) return reject("clickaim: picker guard failed; feature unavailable");
     struct Hook { std::uintptr_t rva; const char* bytes; unsigned size; void* fn; void** original; };
     const Hook hooks[]={
         {0x83fc0,"\x40\x57\x48\x83\xec\x30\x48\x8b\xf9",9,(void*)&LeftDown,(void**)&originalLeftDown},

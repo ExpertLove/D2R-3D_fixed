@@ -1,6 +1,8 @@
 // Console command:  3dcam
 // Hotkey:           F12
-// While on: wheel = zoom, MMB = orbit. F10 = experimental continuous mouse look.
+// While on: wheel = smooth zoom, MMB = orbit. F10 = experimental continuous mouse look.
+// F11 cycles view presets (CLASSIC/CLOSE/TACTICAL); optional over-the-shoulder offset.
+// Zoom/pitch persist; FOV/invert-Y/shoulder live in the settings panel.
 // In F10: hold Shift for a free cursor; release to resume mouse look without a jump.
 // Camera tracking removed. Opt-in clickaim: F selects nearest hostile, manual mouse attacks aim.
 // Red projected ground ring uses native UI packets; slope height remains approximate.
@@ -35,6 +37,8 @@
 #include "center_target.h"
 #include "settings_ui.h"
 #include "distance_client.h"
+#include "camera_motion.h"
+#include "hud_toast.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -43,9 +47,9 @@ using namespace D2RL;
 namespace {
 
 // Defaults
-constexpr float kFov = 60.0f;            // perspective vertical FOV (deg)
-constexpr float kDist = 45.0f;           // default camera-to-pivot distance (world units); the wheel changes it
-constexpr float kPitch = 22.0f;          // default pitch (deg)
+constexpr float kFov = 60.0f;            // default perspective vertical FOV (deg); settings panel changes it
+constexpr float kDist = camera_motion::DefaultDistance;   // default camera-to-pivot distance (world units)
+constexpr float kPitch = camera_motion::DefaultPitch;     // default pitch (deg)
 constexpr float kHeight = 6.0f;          // pivot lift above the ground look-at point (world up)
 constexpr float kShadowSlope = 0.5f;     // min downward slope of shadow-fit rays
 constexpr bool  kWheelSwallow = true;    // don't pass the wheel to the game while on
@@ -110,10 +114,18 @@ void AxisRot4(float* M, float ux, float uy, float uz, float t) {   // rotation a
 // State
 std::atomic<bool> g_enabled{false};
 std::atomic<float> g_dist{kDist}, g_pitch{kPitch}, g_yaw{0.0f};
+std::atomic<float> g_fov{kFov}, g_shoulder{0.0f};   // published by the input thread
 std::atomic<uint32_t> g_gen{1};
 std::atomic<uintptr_t> g_master{0};
+std::atomic<bool> g_cursorFree{true};              // gear visibility; input thread publishes
+// Input-thread-only motion targets (smooth zoom, preset transitions).
+float g_distTarget = kDist, g_pitchTarget = kPitch, g_motionTau = 0.07f;
+bool g_pitchAnimating = false;
+unsigned g_preset = 0;
+std::atomic<ULONGLONG> g_cameraDirtyAt{0};   // 0 = persisted zoom/pitch up to date
+std::atomic<bool> g_flushCamera{false};       // session boundary: save pending camera state now
 
-struct Cam { uintptr_t ptr; float proj0[16]; float extW, extH, nearZ; int type; bool haveBase, written; uint32_t lastGen; float lookSign; };
+struct Cam { uintptr_t ptr; float proj0[16]; float extW, extH, nearZ; int type; bool haveBase, written; uint32_t lastGen; float lookSign; ULONGLONG seen; };
 SRWLOCK g_camLock = SRWLOCK_INIT;
 Cam g_cams[8];
 int g_camCount = 0;
@@ -132,7 +144,8 @@ float Radius(const Cam&) { return g_dist.load(); }
 // (proj[10] = 0, proj[11] = -1, proj[14] = near), keeping the ortho view's screen offset.
 void BuildProj(const Cam& c, float* M) {
     const float aspect = c.extH > 0 && c.extW / c.extH > 0.1f && c.extW / c.extH < 10.0f ? c.extW / c.extH : 16.0f / 9.0f;
-    const float f = 1.0f / tanf(kFov * 3.14159265f / 360.0f);
+    const float fov = std::clamp(g_fov.load(), float(camera_settings::MinFov), float(camera_settings::MaxFov));
+    const float f = 1.0f / tanf(fov * 3.14159265f / 360.0f);
     const float radius = Radius(c);
     const float nearZ = c.nearZ > 0.0f && c.nearZ < radius * 0.5f ? c.nearZ : radius * 0.05f;
     memset(M, 0, 64);
@@ -182,8 +195,19 @@ uintptr_t HookGetProj(uintptr_t cam) {
     const uintptr_t ret = OrigGetProj(cam);
     AcquireSRWLockExclusive(&g_camLock);
     Cam* c = FindCam(cam);
-    if (!c && g_camCount < 8) { c = &g_cams[g_camCount++]; memset(c, 0, sizeof *c); c->ptr = cam; c->lookSign = -1.0f; }
+    if (!c) {
+        // Recycle the stalest non-world slot instead of silently ignoring new
+        // cameras once 8 pointers have ever been seen in this process.
+        if (g_camCount < 8) c = &g_cams[g_camCount++];
+        else {
+            const uintptr_t master = g_master.load();
+            for (int i = 0; i < g_camCount; ++i)
+                if (g_cams[i].ptr != master && (!c || g_cams[i].seen < c->seen)) c = &g_cams[i];
+        }
+        if (c) { memset(c, 0, sizeof *c); c->ptr = cam; c->lookSign = -1.0f; }
+    }
     if (c) {
+        c->seen = GetTickCount64();
         if (wasDirty || !c->haveBase) {
             memcpy(c->proj0, (void*)(cam + C_PROJ), 64); c->haveBase = true;
             c->type = F<int32_t>(cam, C_TYPE); c->extW = F<float>(cam, C_EXTW); c->extH = F<float>(cam, C_EXTH); c->nearZ = F<float>(cam, C_NEAR);
@@ -222,7 +246,10 @@ void HookViewRebuild(uintptr_t cam) {
         const float un = sqrtf(view[4]*view[4] + view[5]*view[5] + view[6]*view[6]);   // world up in view space
         if (g_yaw.load() != 0.0f && un > 1e-6f) { AxisRot4(Ry, view[4]/un, view[5]/un, view[6]/un, g_yaw.load() * d2r); Mul4(Ry, R, RR); memcpy(R, RR, 64); }
         float A[16]; memcpy(A, R, 64);
-        A[12] = -(P[0]*R[0] + P[1]*R[4] + P[2]*R[8]);
+        // Over-the-shoulder: translating view space by -offset moves the eye to
+        // the right; orientation (movement/map heading) is unchanged.
+        const float shoulder = g_shoulder.load();
+        A[12] = -(P[0]*R[0] + P[1]*R[4] + P[2]*R[8]) - (std::isfinite(shoulder) ? shoulder : 0.0f);
         A[13] = -(P[0]*R[1] + P[1]*R[5] + P[2]*R[9]);
         A[14] = sgn * Radius(*c) - (P[0]*R[2] + P[1]*R[6] + P[2]*R[10]);
         float folded[16], inv[16];
@@ -303,6 +330,9 @@ click_target::SelectionKey g_actionKeys[256]; // ownership by physical key, stab
 bool g_uiKeys[256]{},g_keyHeld[256]{},g_uiMouse[5]{};
 bool g_settingsDirty=false;
 const char* Toggle();
+void CyclePreset();
+void OpenSettings();
+void ApplyConfigToCamera(const camera_settings::Config& c);
 uint64_t g_shiftEpoch = 0;
 constexpr int kReleaseKeys[] = {VK_ESCAPE, VK_MENU, VK_RETURN, VK_OEM_3, 'I', 'C', 'Q', 'T', 'P', 'H'};
 
@@ -410,6 +440,13 @@ bool MovementRequested() {
     return !camera_settings::open.load() && g_keyboardHook && g_relativeMovement && g_freeLook.load() && g_enabled.load() && g_inGame.load() && GameFocused();
 }
 
+// Input thread: gear click or the optional settings hotkey.
+void OpenSettings() {
+    g_mmbDown=false;
+    camera_settings::open.store(true);camera_settings::waiting.store(-1);
+    click_aim::Publish(false,g_shift.held());SetMovementKeys(0);g_movementArmed=false;++g_shiftEpoch;
+}
+
 LRESULT CALLBACK KeyboardProc(int code, WPARAM message, LPARAM data) {
     if (code != HC_ACTION) return CallNextHookEx(g_keyboardHook, code, message, data);
     const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
@@ -442,9 +479,13 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM message, LPARAM data) {
                     } else if(camera_settings::waiting.load()>=0) {
                         auto c=camera_settings::Copy();
                         const bool modifiers=g_keyHeld[0x1d] || g_keyHeld[0x9d] || g_keyHeld[0x38] || g_keyHeld[0xb8] || g_shift.held();
-                        if(!modifiers && camera_settings::Bind(c,unsigned(camera_settings::waiting.load()),physical)) {
+                        if(key->vkCode==VK_BACK && camera_settings::Unbind(c,unsigned(camera_settings::waiting.load()))) {
+                            camera_settings::Set(c); camera_settings::waiting.store(-1);g_settingsDirty=true;
+                        } else if(!modifiers && camera_settings::Bind(c,unsigned(camera_settings::waiting.load()),physical)) {
                             camera_settings::Set(c); camera_settings::waiting.store(-1);g_settingsDirty=true;
                         } else camera_settings::status.store(1);
+                    } else if(camera_settings::ActionForKey(camera_settings::Copy(),physical)==camera_settings::Settings) {
+                        camera_settings::Close(); ++g_shiftEpoch; // same key toggles the panel closed
                     }
                 }
                 if(first) g_uiKeys[physical]=true; // repeats of pre-panel native downs retain their native key-up
@@ -463,18 +504,30 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM message, LPARAM data) {
         if (swallow) return 1; // no native stand-still binding for our temporary cursor modifier
     }
     const auto bindings=camera_settings::Copy();
-    int action=-1;
-    for(int i=0;i<camera_settings::ActionCount;++i) if(bindings.keys[i]==physical) action=i;
+    // Unbound (0) never matches; scan-code-0 events from special keys are ignored.
+    const int action=camera_settings::ActionForKey(bindings,physical);
     bool eligible=action>=0 && GameFocused() && !camera_settings::open.load();
     if(action>=0 && action<=camera_settings::Center)
         eligible=eligible && click_aim::context().active && (action!=camera_settings::Elite || click_aim::eliteReady.load());
     if(action==camera_settings::Look) eligible=eligible && g_enabled.load() && g_inGame.load() && g_lifecycleOk;
+    if(action==camera_settings::View || action==camera_settings::Settings) eligible=eligible && g_enabled.load() && g_inGame.load();
     const auto choice=g_actionKeys[physical].event(down,eligible);
     if(choice.request) {
         if(action<=camera_settings::Center) click_aim::QueueSelection(action==camera_settings::Previous?-1:1,action==camera_settings::Elite,action==camera_settings::Center);
-        else if(action==camera_settings::Look) g_freeLook.store(!g_freeLook.load());
-        else if(action==camera_settings::Movement) g_relativeMovement=!g_relativeMovement;
-        else if(action==camera_settings::Camera && g_ctx) g_ctx->LogInfo(Toggle());
+        else if(action==camera_settings::Look) {
+            const bool on=!g_freeLook.load(); g_freeLook.store(on);
+            hud_toast::Show(on?"MOUSE LOOK ON":"MOUSE LOOK OFF");
+        }
+        else if(action==camera_settings::Movement) {
+            g_relativeMovement=!g_relativeMovement;
+            hud_toast::Show(g_relativeMovement?"RELATIVE WASD ON":"RELATIVE WASD OFF");
+        }
+        else if(action==camera_settings::Camera && g_ctx) {
+            g_ctx->LogInfo(Toggle());
+            if(g_enabled.load()) hud_toast::Show("3D CAMERA ON");
+        }
+        else if(action==camera_settings::View) CyclePreset();
+        else if(action==camera_settings::Settings) OpenSettings();
     }
     // All camera hotkeys are owned pairs. Distance has no F12 binding.
     if(choice.consume) return 1;
@@ -522,19 +575,76 @@ void UpdateMovement() {
     }
 }
 
+// Input thread only. Marks the persisted camera state for a debounced save.
+void NoteCameraChange() {
+    camera_settings::zoomTenths.store(int(lroundf(g_distTarget * 10.0f)));
+    camera_settings::pitchTenths.store(int(lroundf((g_pitchAnimating ? g_pitchTarget : g_pitch.load()) * 10.0f)));
+    g_cameraDirtyAt.store(GetTickCount64());
+}
+
 void RotateCamera(float dx, float dy) {
-    const float sensitivity=camera_settings::Copy().sensitivity/100.0f;
-    dx*=sensitivity;dy*=sensitivity;
+    const auto config=camera_settings::Copy();
+    const float sensitivity=config.sensitivity/100.0f;
+    dx*=sensitivity;dy*=sensitivity*(config.invertY?-1.0f:1.0f);
     float yaw = g_yaw.load() + dx * 0.10f;
     yaw -= 360.0f * floorf((yaw + 180.0f) / 360.0f);
     g_yaw.store(yaw);
-    g_pitch.store(std::clamp(g_pitch.load() + dy * 0.075f, -85.0f, 60.0f));
+    if (dy != 0.0f) {
+        g_pitchAnimating = false; // manual vertical look wins over a preset transition
+        // Lower bound keeps the eye above the pivot/terrain (old -85 looked from under the ground).
+        g_pitch.store(camera_motion::ClampPitch(g_pitch.load() + dy * 0.075f));
+        NoteCameraChange();
+    }
     g_gen.fetch_add(1);
+}
+
+void CyclePreset() {
+    g_preset = camera_motion::NextPreset(g_preset);
+    const auto& preset = camera_motion::Presets[g_preset];
+    g_distTarget = preset.distance;
+    g_pitchTarget = preset.pitch;
+    g_pitchAnimating = true;
+    g_motionTau = 0.22f;
+    NoteCameraChange();
+    char text[32];
+    snprintf(text, sizeof text, "VIEW: %s", preset.name);
+    hud_toast::Show(text);
+}
+
+void ApplyConfigToCamera(const camera_settings::Config& c) {
+    g_fov.store(float(c.fov));
+    g_gen.fetch_add(1);
+}
+
+// Smooth zoom, preset transitions and shoulder slide. Input thread, 10 ms timer.
+void UpdateCameraMotion() {
+    static ULONGLONG lastTick = 0;
+    const ULONGLONG now = GetTickCount64();
+    const float dt = lastTick ? std::clamp(float(now - lastTick) / 1000.0f, 0.0f, 0.05f) : 0.01f;
+    lastTick = now;
+    bool changed = false;
+    const float dist = g_dist.load();
+    const float nextDist = camera_motion::Approach(dist, g_distTarget, dt, g_motionTau, 0.005f);
+    if (nextDist != dist) { g_dist.store(nextDist); changed = true; }
+    if (g_pitchAnimating) {
+        const float pitch = g_pitch.load();
+        const float nextPitch = camera_motion::Approach(pitch, g_pitchTarget, dt, g_motionTau, 0.01f);
+        if (nextPitch != pitch) { g_pitch.store(nextPitch); changed = true; }
+        if (nextPitch == g_pitchTarget) g_pitchAnimating = false;
+    }
+    const float shoulder = g_shoulder.load();
+    const float shoulderTarget = camera_motion::ShoulderOffset(camera_settings::Copy().shoulder, nextDist);
+    const float nextShoulder = camera_motion::Approach(shoulder, shoulderTarget, dt, 0.12f, 0.002f);
+    if (nextShoulder != shoulder) { g_shoulder.store(nextShoulder); changed = true; }
+    if (changed) g_gen.fetch_add(1);
+    else if (nextDist == g_distTarget && !g_pitchAnimating) g_motionTau = 0.07f;
 }
 
 void __cdecl GameplayChanged(const PluginContext*, const Lifecycle::GameplayEvent* event, void*) noexcept {
     if (!event || event->structSize < sizeof(Lifecycle::GameplayEvent)) return;
     camera_settings::Close(); camera_settings::frameTick.store(0);
+    hud_toast::Clear();
+    g_flushCamera.store(true); // persist pending zoom/pitch at session boundaries (input thread saves)
     camera_automap::Invalidate();
     click_aim::Invalidate();
     click_aim::Publish(false,false);
@@ -585,6 +695,7 @@ void UpdateMouseLook() {
     const bool panel=camera_settings::open.load();
     click_aim::Publish(!panel && g_mouseHook && g_keyboardHook && g_freeLook.load() && g_enabled.load() && g_inGame.load() && focused,shiftHeld);
     const auto action = capture.update(g_freeLook.load(), shiftHeld || panel);
+    g_cursorFree.store(action == third_person::CaptureAction::Free);
     if (action == third_person::CaptureAction::Free) {
         pendingX = pendingY = 0.0f;
         return; // no centering/rotation while Shift is held; requested F10 mode persists
@@ -636,9 +747,8 @@ bool SettingsMouse(WPARAM message,const MSLLHOOKSTRUCT& ms) {
     if(!panel) {
         if(!(down && button==0 && coordinates && (!g_freeLook.load() || g_shift.held()) && layout.gear.contains(x,y))) return false;
         if((GetAsyncKeyState(VK_RBUTTON)&0x8000) || (GetAsyncKeyState(VK_MBUTTON)&0x8000)) return false;
-        g_uiMouse[0]=true;g_mmbDown=false;
-        camera_settings::open.store(true);camera_settings::waiting.store(-1);
-        click_aim::Publish(false,g_shift.held());SetMovementKeys(0);g_movementArmed=false;++g_shiftEpoch;
+        g_uiMouse[0]=true;
+        OpenSettings();
         return true;
     }
     if(down && button>=0) g_uiMouse[button]=true;
@@ -648,21 +758,29 @@ bool SettingsMouse(WPARAM message,const MSLLHOOKSTRUCT& ms) {
         else {
             camera_settings::waiting.store(-1);
             auto c=camera_settings::Copy();bool changed=false;
+            using namespace camera_settings;
             switch(hit) {
-                case 100: camera_settings::Close();++g_shiftEpoch;break;
-                case 101: if(g_ctx) g_ctx->LogInfo(click_aim::Toggle());c.targeting=click_aim::enabled.load();changed=true;break;
-                case 102: if(g_ctx) g_ctx->LogInfo(camera_automap::Toggle());c.mapFollow=camera_automap::enabled.load();changed=true;break;
-                case 103: c.seal=!c.seal;changed=true;break;
-                case 104: c.sensitivity=std::max(25u,c.sensitivity-5);changed=true;break;
-                case 105: c.sensitivity=std::min(250u,c.sensitivity+5);changed=true;break;
-                case 106: c.radius=std::max(3u,c.radius-1);changed=true;break;
-                case 107: c.radius=std::min(18u,c.radius+1);changed=true;break;
-                case 108: c={};click_aim::enabled.store(false);click_aim::Invalidate();camera_automap::enabled.store(true);camera_automap::Invalidate();changed=true;break;
-                case 109: if(distance_control::client.flags.load()&distance_control::Present) {
+                case HitClose: Close();++g_shiftEpoch;break;
+                case HitTargeting: if(g_ctx) g_ctx->LogInfo(click_aim::Toggle());c.targeting=click_aim::enabled.load();changed=true;break;
+                case HitMap: if(g_ctx) g_ctx->LogInfo(camera_automap::Toggle());c.mapFollow=camera_automap::enabled.load();changed=true;break;
+                case HitSeal: c.seal=!c.seal;changed=true;break;
+                case HitSensDown: c.sensitivity=std::max(25u,c.sensitivity-5);changed=true;break;
+                case HitSensUp: c.sensitivity=std::min(250u,c.sensitivity+5);changed=true;break;
+                case HitRadiusDown: c.radius=std::max(3u,c.radius-1);changed=true;break;
+                case HitRadiusUp: c.radius=std::min(18u,c.radius+1);changed=true;break;
+                case HitFovDown: c.fov=std::max(MinFov,c.fov-5);changed=true;break;
+                case HitFovUp: c.fov=std::min(MaxFov,c.fov+5);changed=true;break;
+                case HitInvert: c.invertY=!c.invertY;changed=true;break;
+                case HitShoulder: c.shoulder=(c.shoulder+1)%ShoulderModes;changed=true;break;
+                case HitDefaults:
+                    c={};click_aim::enabled.store(false);click_aim::Invalidate();camera_automap::enabled.store(true);camera_automap::Invalidate();changed=true;
+                    g_preset=0;g_distTarget=kDist;g_pitchTarget=kPitch;g_pitchAnimating=true;g_motionTau=0.22f;NoteCameraChange();
+                    break;
+                case HitDistance: if(distance_control::client.flags.load()&distance_control::Present) {
                     if(!distance_control::client.toggle() && g_ctx) g_ctx->LogWarn("settings: render distance control unavailable; see distance plugin log");
                 } break;
             }
-            if(changed) { camera_settings::Set(c);g_settingsDirty=true; }
+            if(changed) { Set(c);ApplyConfigToCamera(c);g_settingsDirty=true; }
         }
     }
     // Eat all panel button/wheel events, including clicks outside its rectangle.
@@ -682,9 +800,11 @@ LRESULT CALLBACK MouseProc(int code, WPARAM w, LPARAM l) {
         const auto* ms = (const MSLLHOOKSTRUCT*)l;
         if(w==WM_LBUTTONDOWN && !(ms->flags&LLMHF_INJECTED)) click_aim::PhysicalLeftDown();
         if (w == WM_MOUSEWHEEL) {
-            const int steps = (short)HIWORD(ms->mouseData) / WHEEL_DELTA;
-            g_dist.store(std::clamp(g_dist.load() / powf(1.12f, (float)steps), 3.5f, 1500.0f));
-            g_gen.fetch_add(1);
+            // Fractional notches: precision touchpads/free-spin wheels used to
+            // be swallowed without zooming. The timer eases toward the target.
+            g_distTarget = camera_motion::Zoom(g_distTarget, camera_motion::WheelNotches((short)HIWORD(ms->mouseData)));
+            g_motionTau = 0.07f;
+            NoteCameraChange();
             if (kWheelSwallow) return 1;
         } else if (w == WM_MBUTTONDOWN) {
             g_mmbDown = true; g_mmbLast = ms->pt;
@@ -738,9 +858,13 @@ bool BuildTargetRing(unsigned width,unsigned height,target_ring::Batch& batch) {
         AcquireSRWLockShared(&g_camLock);
         const bool valid=g_ringFrame.copy(g_master.load(),GetTickCount64(),camera);
         ReleaseSRWLockShared(&g_camLock);
-        if(valid) target_ring::Build(camera,target.x,target.z,width,height,batch,std::uint32_t(GetTickCount64()));
+        const auto now=std::uint32_t(GetTickCount64());
+        // Seal on the ground when visible; otherwise an edge arrow points to the target.
+        if(valid && !target_ring::Build(camera,target.x,target.z,width,height,batch,now))
+            target_ring::AppendOffscreenArrow(camera,target.x,target.z,batch,now);
     }
-    camera_settings::Draw(batch,click_aim::enabled.load(),camera_automap::enabled.load(),distance_control::client.flags.load());
+    camera_settings::Draw(batch,click_aim::enabled.load(),camera_automap::enabled.load(),distance_control::client.flags.load(),g_cursorFree.load());
+    hud_toast::Draw(batch);
     return batch.count>0;
 }
 
@@ -787,11 +911,19 @@ DWORD WINAPI MouseThread(void*) {
                 if(!(before&distance_control::Present) && (distance_control::client.flags.load()&distance_control::Present) && g_ctx)
                     g_ctx->LogInfo("settings: optional render distance service connected; F12 controls camera only");
             }
+            {
+                // Debounced camera persistence: 3 s after the last zoom/pitch change,
+                // or immediately at a session boundary.
+                const bool flush=g_flushCamera.exchange(false);
+                const auto dirtyAt=g_cameraDirtyAt.load();
+                if(dirtyAt && (flush || GetTickCount64()-dirtyAt>=3000)) { g_cameraDirtyAt.store(0); g_settingsDirty=true; }
+            }
             if(g_settingsDirty) {
                 g_settingsDirty=false;
                 if(!camera_settings::Save() && g_ctx) g_ctx->LogError("settings: could not atomically save 3dcam-settings.ini");
             }
             UpdateMouseLook();
+            UpdateCameraMotion();
             UpdateMovement();
             camera_automap::Flush(g_ctx);
             click_aim::Flush(g_ctx);
@@ -806,6 +938,7 @@ DWORD WINAPI MouseThread(void*) {
         DispatchMessageW(&m);
     }
     distance_control::client.close(); // release loader lease before provider may unload
+    if(g_settingsDirty || g_cameraDirtyAt.load()) camera_settings::Save(); // keep last zoom/pitch on exit
     SetMovementKeys(0);
     if (g_keyboardHook) UnhookWindowsHookEx(g_keyboardHook);
     g_keyboardHook = nullptr;
@@ -818,8 +951,8 @@ DWORD WINAPI MouseThread(void*) {
 }  // namespace
 
 static const PluginInfo g_info = {
-    PluginInfoSize, D2RL_PLUGIN_ABI_VERSION, "d2r-3d-3dcam", "3dcam", "1.1.0-experimental.23", "Tandanu",
-    "Perspective camera, camera-relative WASD, Shift cursor and experimental heading-up Tab map. F12 camera, F10 mouse look.",
+    PluginInfoSize, D2RL_PLUGIN_ABI_VERSION, "d2r-3d-3dcam", "3dcam", "1.2.0-experimental.24", "Tandanu",
+    "Perspective camera, smooth zoom, view presets, shoulder view, camera-relative WASD, heading-up Tab map. F12 camera, F10 mouse look, F11 view.",
     PluginFlags::Shared | PluginFlags::NativeHooks, {0, 0, 0, 0},
 };
 
@@ -837,6 +970,17 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     ctx->LogInfo(baseMessage);
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)&Cmd3dcam, &g_self);
     camera_settings::Load(g_self);
+    {
+        // Restore the last camera distance/pitch and FOV (validated, clamped).
+        const auto saved=camera_settings::Copy();
+        g_distTarget=camera_motion::ClampDistance(camera_settings::zoomTenths.load()/10.0f);
+        g_pitchTarget=camera_motion::ClampPitch(camera_settings::pitchTenths.load()/10.0f);
+        g_dist.store(g_distTarget); g_pitch.store(g_pitchTarget);
+        g_fov.store(float(saved.fov));
+        g_shoulder.store(camera_motion::ShoulderOffset(saved.shoulder,g_distTarget));
+        if(camera_settings::status.load()==1) ctx->LogWarn("settings: some 3dcam-settings.ini values were invalid and were repaired individually");
+    }
+    click_aim::notify=+[](const char* text) { hud_toast::Show(text); };
     const bool hc = memcmp((void*)(g_base + RVA_COPY_CALL), kSigCopyCall, sizeof kSigCopyCall) == 0 &&
                     ctx->InstallInlineHook(RVA_CAMCOPY, kSigCamCopy, sizeof kSigCamCopy, (void*)&HookCamCopy, (void**)&OrigCamCopy);
     const bool h1 = ctx->InstallInlineHook(RVA_GETPROJ, kSigGetProj, sizeof kSigGetProj, (void*)&HookGetProj, (void**)&OrigGetProj);
@@ -861,7 +1005,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     click_aim::enabled.store(saved.targeting && click_aim::ready.load());
     camera_automap::enabled.store(saved.mapFollow);
     // No automatic selection, target steering or passive relation hook.
-    ctx->LogInfo("3dcam .23: optional persisted render distance via leased service; F12 camera only; settings + V selection; clickaim opt-in");
+    ctx->LogInfo("3dcam .24: smooth zoom, F11 view presets, shoulder view, FOV/invert-Y settings, off-screen target arrow, hotkey toasts; persisted zoom/pitch");
     ctx->LogInfo(g_lifecycleOk ? "3dcam: F10 mouse look + experimental camera-relative WASD; native WASD bindings required" : "3dcam: lifecycle unavailable; F10 disabled");
     g_mouseThread = CreateThread(nullptr, 0, MouseThread, nullptr, 0, &g_mouseThreadId);
     if (!g_mouseThread) { ctx->LogError("3dcam: input thread failed"); return false; }
@@ -870,6 +1014,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 }
 
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
+    click_aim::notify=nullptr;
     camera_automap::ready.store(false);
     camera_automap::Invalidate();
     click_aim::enabled.store(false);

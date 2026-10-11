@@ -13,6 +13,12 @@ inline ActiveFn activeMode=nullptr;
 inline SizeFn sizeGetter=nullptr;
 inline std::atomic<bool> ready{false};
 inline std::atomic<unsigned> frames{0},uploads{0},skipped{0};
+// Reused per-frame buffers (the batch alone is ~512 KB). The old code allocated
+// and zeroed it every rendered frame. A concurrent/nested caller that cannot
+// claim them falls back to private allocations.
+inline std::atomic<bool> buffersBusy{false};
+struct SharedBuffers { target_ring::Batch batch; std::vector<std::uint32_t> storage; };
+inline SharedBuffers& Shared() { static SharedBuffers buffers; return buffers; }
 struct Scope { std::uintptr_t first=0; const target_ring::Batch* batch=nullptr; };
 inline thread_local Scope scope;
 inline bool Size(std::uintptr_t target,std::uint64_t& out) noexcept {
@@ -41,19 +47,28 @@ inline void Render(std::uintptr_t renderer,std::uintptr_t queue,std::uintptr_t c
        !camera_automap::Read(renderer+0x1c0,target) || !Size(target,dimensions)) {
         ++skipped; original(renderer,queue,commands); return;
     }
-    std::unique_ptr<target_ring::Batch> owned;
+    struct Claim {
+        bool owned=!buffersBusy.exchange(true);
+        ~Claim() { if(owned) buffersBusy.store(false); }
+    } claim;
+    std::unique_ptr<SharedBuffers> fallback;
+    SharedBuffers* buffers=nullptr;
     bool built=false;
     try {
-        owned=std::make_unique<target_ring::Batch>();
-        built=build(unsigned(dimensions),unsigned(dimensions>>32),*owned);
+        if(claim.owned) buffers=&Shared();
+        else { fallback=std::make_unique<SharedBuffers>(); buffers=fallback.get(); }
+        buffers->batch.count=0;
+        built=build(unsigned(dimensions),unsigned(dimensions>>32),buffers->batch);
     } catch(...) { ++skipped; original(renderer,queue,commands); return; }
-    auto& batch=*owned;
+    auto& batch=buffers->batch;
     if(!built || !batch.count || batch.count>target_ring::MaxQuads) {
-        ++skipped; original(renderer,queue,commands); return;
+        // Nothing to draw is the common case: no copy of the UI queue at all.
+        if(built && batch.count>target_ring::MaxQuads) ++skipped;
+        original(renderer,queue,commands); return;
     }
     const auto oldBytes=std::size_t(source.words)*4;
     const auto totalBytes=oldBytes+std::size_t(batch.count)*sizeof(target_ring::SolidPacket);
-    std::vector<std::uint32_t> storage; // no nontrivial DLL TLS destructor on renderer thread
+    auto& storage=buffers->storage; // global/heap, no nontrivial DLL TLS destructor on renderer thread
     try { storage.resize(totalBytes/4); }
     catch(...) { ++skipped; original(renderer,queue,commands); return; }
     auto* bytes=reinterpret_cast<unsigned char*>(storage.data());

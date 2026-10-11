@@ -6,21 +6,21 @@
 
 ## Download — ready to install
 
-### [⬇ Download Standard — recommended](https://github.com/ExpertLove/D2R-3D_fixed/releases/download/v1.1.0-experimental.23/d2r-third-person-1.1.0-experimental.23-standard-windows-x64.zip)
+### [⬇ Download Standard — recommended](https://github.com/ExpertLove/D2R-3D_fixed/releases/download/v1.2.0-experimental.24/d2r-third-person-1.2.0-experimental.24-standard-windows-x64.zip)
 Camera, movement, targeting and settings. **No increased draw distance.**
 
-### [⬇ Download Extended — optional increased draw distance](https://github.com/ExpertLove/D2R-3D_fixed/releases/download/v1.1.0-experimental.23/d2r-third-person-1.1.0-experimental.23-extended-windows-x64.zip)
+### [⬇ Download Extended — optional increased draw distance](https://github.com/ExpertLove/D2R-3D_fixed/releases/download/v1.2.0-experimental.24/d2r-third-person-1.2.0-experimental.24-extended-windows-x64.zip)
 Everything in Standard, plus the separately switchable distance plugin. Higher performance cost when enabled.
 
 **These ZIPs contain the ready-to-use DLLs. You do not need to build anything.** Do not use **Code → Download ZIP** or **Source code** to install the plugin; those downloads are for developers.
 
-[Release page, checksums and source downloads](https://github.com/ExpertLove/D2R-3D_fixed/releases/tag/v1.1.0-experimental.23) · [Installation instructions](#install-or-upgrade)
+[Release page, checksums and source downloads](https://github.com/ExpertLove/D2R-3D_fixed/releases/tag/v1.2.0-experimental.24) · [Installation instructions](#install-or-upgrade)
 
 ---
 
 Perspective third-person camera, camera-relative movement and explicit target selection for **Diablo II: Resurrected through D2RLoader**.
 
-**Version: 1.1.0-experimental.23.** This is a loader plugin, not a standalone injector. Not affiliated with or endorsed by Blizzard or D2RLoader.
+**Version: 1.2.0-experimental.24.** This is a loader plugin, not a standalone injector. Not affiliated with or endorsed by Blizzard or D2RLoader.
 
 [Building](docs/BUILDING.md) · [Known limitations](docs/KNOWN_ISSUES.md) · [Changelog](CHANGELOG.md) · [Credits and permissions](THIRD_PARTY_NOTICES.md)
 
@@ -39,11 +39,14 @@ Increased distance can cause stuttering, higher memory use and lower FPS. Turn i
 
 ## Features
 
-- Perspective camera, continuous mouse look and wheel zoom.
+- Perspective camera, continuous mouse look and smooth wheel zoom; distance and pitch are remembered.
+- **F11 view presets** (CLASSIC / CLOSE / TACTICAL) with animated transitions.
+- Optional **over-the-shoulder** camera (right/left), adjustable **field of view** and **invert Y**.
 - Eight-way WASD relative to the camera; hold Shift for a free cursor.
 - Camera-aligned native Tab automap.
 - Explicit next/previous, elite and screen-center enemy selection.
-- Animated seal under the selected enemy, with the native name/health panel.
+- Animated seal under the selected enemy, with the native name/health panel; an **edge arrow** points to a selected enemy that is off-screen or behind you.
+- Short on-screen confirmations for hotkeys (mouse look, WASD mode, view preset, no target found).
 - In-game settings gear, physical-key remapping, sensitivity and selection-radius controls.
 - Extended only: persisted render-distance switch, independent of the camera.
 
@@ -62,7 +65,7 @@ Use this beta for **offline testing** with a disposable character and backed-up 
 3. Back up existing plugin DLLs and their INI files **outside** `d2rloader/plugins/`.
 4. Copy the DLL(s) from your chosen archive into `<game>/d2rloader/plugins/`.
    - **Standard:** install `d2rl-3dcam.dll`. Remove any existing `d2rl-renderdistance.dll` from this directory if you want a genuinely camera-only installation.
-   - **Extended:** install **both matching .23 DLLs**. Replace the older distance DLL; do not keep it under a second filename. The old distance plugin has a different F12 behavior and does not support this panel service.
+   - **Extended:** install **both matching .24 DLLs**. Replace the older distance DLL; do not keep it under a second filename. The old distance plugin has a different F12 behavior and does not support this panel service.
 5. Launch through D2RLoader and enter an offline game.
 6. Bind the game's native movement actions to **W/A/S/D**. Press **F12** for 3D, then **F10** for mouse look.
 
@@ -70,8 +73,8 @@ Do not place backup DLLs in the plugins directory: they may be loaded as extra p
 
 ## Open settings and select a target
 
-1. While 3D is enabled, find the small red/gold gear at the **right edge, about 38% down the screen**.
-2. In mouse-look mode, hold **Shift** and click the gear. Release Shift after opening; the panel keeps the cursor free.
+1. While 3D is enabled, find the small red/gold gear at the **right edge, about 38% down the screen**. It is hidden while mouse look owns the cursor and appears as soon as the cursor is free.
+2. In mouse-look mode, hold **Shift** and click the gear. Release Shift after opening; the panel keeps the cursor free. You can also bind an **OPEN SETTINGS** key in the panel (unbound by default).
 3. Set **TARGETING: ON**. Targeting starts disabled until enabled by you.
 4. Close with X or Escape. Press **V** when an enemy is near the screen center. A miss preserves your current live target.
 
@@ -98,7 +101,8 @@ The optional console command `renderdist` uses the same queued, persisted settin
 | F10 | Toggle continuous mouse look |
 | F9 | Toggle camera-relative WASD |
 | Hold Shift | Temporarily free the cursor |
-| Mouse wheel | Zoom |
+| Mouse wheel | Smooth zoom |
+| F11 | Cycle view presets: CLASSIC / CLOSE / TACTICAL |
 | Middle-button drag | Orbit outside F10 mode |
 | Tab | Native automap |
 | F / G | Next / previous eligible enemy |
@@ -109,9 +113,11 @@ The optional console command `renderdist` uses the same queued, persisted settin
 
 F/G/X/V require **TARGETING + 3D + F10**. Held keys do not repeatedly cycle targets.
 
-Click a key field, release modifiers and press a new key. Bindings use physical keyboard positions regardless of input language. **Single keys only**, not Ctrl/Alt/Shift chords. WASD, Shift and native UI safety keys are reserved. Internal duplicates are rejected; conflicts with the game's or other plugins' bindings are not detected.
+Click a key field, release modifiers and press a new key; **Backspace** clears the binding and Escape cancels. Bindings use physical keyboard positions regardless of input language. **Single keys only**, not Ctrl/Alt/Shift chords. WASD, Shift and native UI safety keys are reserved. Internal duplicates are rejected; conflicts with the game's or other plugins' bindings are not detected.
 
-Camera settings are saved automatically to `d2rloader/plugins/3dcam-settings.ini`. Missing/invalid bindings fall back to defaults. Sensitivity 100% preserves the base camera behavior. Default center-selection radius is 9% of viewport height, adjustable from 3% to 18%.
+The panel also offers **INVERT Y**, **SHOULDER: CENTER/RIGHT/LEFT** and **FIELD OF VIEW** (45-90, default 60).
+
+Camera settings, including the last zoom distance and pitch, are saved automatically to `d2rloader/plugins/3dcam-settings.ini`. Older files are migrated; an invalid or conflicting value is repaired individually without resetting the rest. Sensitivity 100% preserves the base camera behavior. Default center-selection radius is 9% of viewport height, adjustable from 3% to 18%.
 
 Optional camera console commands: `3dcam`, `clickaim`, `mapfollow`. Direct camera console toggles are session-local; TARGETING/MAP FOLLOW changes through the panel persist. Distance has its own persisted state and never depends on the camera's F12 toggle.
 
@@ -121,7 +127,7 @@ Close the game. Remove the relevant DLL(s) or restore matching backups. To switc
 
 ## Validation and bug reports
 
-Thirteen automated test suites cover selection, input policies, native-adapter mocks, geometry, settings, distance persistence and the optional inter-plugin service. The previous .22 camera received basic local gameplay acceptance. **The .23 distance integration still needs wider gameplay, restart, performance and edition-switching validation.** CI configuration is provided, but a remote GitHub Actions run is not claimed until it actually runs.
+Fourteen automated test suites cover selection, input policies, native-adapter mocks, geometry, settings migration, camera motion, on-screen messages, distance persistence and the optional inter-plugin service. The .22/.23 camera received basic local gameplay acceptance. **The .24 additions (presets, shoulder view, FOV, edge arrow, messages, dense-area targeting) have not yet been verified in gameplay.** CI configuration is provided, but a remote GitHub Actions run is not claimed until it actually runs.
 
 When reporting a bug, include plugin/game/loader versions, edition, resolution/DPI, other plugins, reproduction steps, screenshot and a sanitized excerpt of `d2rloader/logs/d2r-3d-3dcam.log` or `d2r-3d-renderdistance.log`. **Do not upload savegames, game binaries, memory dumps, passwords or tokens.**
 

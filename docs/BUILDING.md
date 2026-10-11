@@ -49,7 +49,7 @@ python tools/package_release.py --dll-dir path/to/verified/build --edition all
 
 The command refuses to overwrite an existing archive with the same version. It does not read the game directory, personal saves or local runtime configuration. Archive hash checks are integrity checks, not an authenticity signature.
 
-For publication, use tag `v1.1.0-experimental.23`, mark the GitHub release as a **pre-release**, and attach both edition ZIPs and both checksum files. GitHub supplies source archives from the tag; a local source ZIP can also be produced with `git archive`. Review notices and archive contents before publishing.
+For publication, use tag `v1.2.0-experimental.24`, mark the GitHub release as a **pre-release**, and attach both edition ZIPs and both checksum files. GitHub supplies source archives from the tag; a local source ZIP can also be produced with `git archive`. Review notices and archive contents before publishing.
 
 ## Inter-plugin control
 

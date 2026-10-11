@@ -268,7 +268,7 @@ ConsoleCommandResult __cdecl CmdRenderDist(D2R::Game::Client*, const ConsoleComm
 }  // namespace
 
 static const PluginInfo g_info = {
-    PluginInfoSize, D2RL_PLUGIN_ABI_VERSION, "d2r-3d-renderdistance", "renderdistance", "1.1.0-experimental.23", "Tandanu",
+    PluginInfoSize, D2RL_PLUGIN_ABI_VERSION, "d2r-3d-renderdistance", "renderdistance", "1.2.0-experimental.24", "Tandanu",
     "Optional extended render distance. Toggle via the camera settings panel or renderdist; choice persists, default OFF. No F12 binding.",
     PluginFlags::Shared | PluginFlags::NativeHooks, {0, 0, 0, 0},
 };

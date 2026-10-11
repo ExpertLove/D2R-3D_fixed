@@ -73,14 +73,25 @@ int main() {
     m=fixture(); m.put<uint32_t>(player+8,9); m.put<uintptr_t>(player+0x158,player);
     check(!sample(),"hash cycle fails closed");
     m=fixture();
-    for (uint32_t i=0;i<129;++i) {
-        const uintptr_t p=monster+i*0x200;
+    const uint32_t crowd=uint32_t(frame.units.size())+8;
+    for (uint32_t i=0;i<crowd;++i) {
+        const uintptr_t p=monster+i*0x200, own=0x800000+i*0x10;
         m.put<uint32_t>(p,1); m.put<uint32_t>(p+4,19); m.put<uint32_t>(p+8,16+i);
         m.put<uint32_t>(p+12,1); m.put<uint32_t>(p+0x124,15);
-        m.put<uintptr_t>(p+0x38,mpath);
-        m.put<uintptr_t>(p+0x160,i<128 ? p+0x200 : 0);
+        m.put<uintptr_t>(p+0x38,own);
+        // Earlier list entries are FARTHER, so overflow must evict them.
+        m.put<uint32_t>(own,100*32768+(crowd-i)*3277); m.put<uint32_t>(own+4,100*32768);
+        m.put<uintptr_t>(p+0x160,i+1<crowd ? p+0x200 : 0);
     }
-    check(!sample() && !frame.count,"candidate overflow discards whole frame");
+    check(sample() && frame.complete && frame.count==frame.units.size() && frame.dropped==8,"dense crowd keeps a full snapshot");
+    bool farthestEvicted=true, nearestKept=false;
+    for (uint32_t i=0;i<frame.count;++i) {
+        if (frame.units[i].key.id<16+8) farthestEvicted=false;
+        if (frame.units[i].key.id==16+crowd-1) nearestKept=true;
+    }
+    check(farthestEvicted && nearestKept,"overflow keeps the nearest units");
+    m.put<uintptr_t>(monster+(crowd-1)*0x200+0x160,monster); // list cycle
+    check(!sample() && !frame.count,"bounded walk still fails closed on a unit-list cycle");
     m=fixture(); check(sample(),"baseline for path replacement");
     const auto beforePath=frame.units[0].key;
     m.put<uintptr_t>(monster+0x38,mpath+0x100);

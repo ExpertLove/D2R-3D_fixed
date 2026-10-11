@@ -83,7 +83,7 @@ int main() {
         unsigned(distance_control::Present|distance_control::Supported|distance_control::SaveFailed)}) {
         target_ring::Batch extended;extended.width=1280;extended.height=720;extended.count=target_ring::SealQuads;
         Draw(extended,true,true,flags);CHECK(extended.count<target_ring::MaxQuads-100);
-        Layout l(1280,720);CHECK(l.hit(l.x+300*l.scale,l.y+330*l.scale)==109);
+        Layout l(1280,720);CHECK(l.hit(l.x+300*l.scale,l.y+380*l.scale)==camera_settings::HitDistance);
     }
     Close();target_ring::Batch gear;gear.width=1280;gear.height=720;Draw(gear,false,false);CHECK(gear.count>100 && gear.count<=GearSize*GearSize && waiting==-1);
     CHECK(GearPixels[0]!=0); // original cropped red face, no enclosing procedural frame

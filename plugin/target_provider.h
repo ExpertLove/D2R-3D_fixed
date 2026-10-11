@@ -3,9 +3,11 @@
 // Build-specific CLIENT unit reader. Call only on the SDK UI thread.
 // No native calls, writes, or pointers escape in Frame. A coherent client update
 // is still not a spawn notification: observation generations are NOT attack handles.
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstddef>
+#include <vector>
 #include "target_selection.h"
 #include "target_world.h"
 
@@ -21,14 +23,18 @@ struct ObservedTarget {
 struct TargetFrame {
     uint64_t session = 0, tick = 0;
     float playerX = 0, playerZ = 0;
-    uint32_t count = 0, rejected = 0, pets = 0;
+    uint32_t count = 0, rejected = 0, pets = 0, dropped = 0;
     bool complete = false;
-    std::array<ObservedTarget, 128> units{};
+    std::array<ObservedTarget, 256> units{};
 };
+// Hostile terrain LOS is only traced near the player; all consumers use an
+// 80-unit range (88 with hysteresis). Farther units report Sight::Unknown.
+inline constexpr float SightTraceRange = 128.0f;
+inline constexpr size_t MaxRoomUnits = 16384;
 
 class TargetProvider {
     struct Identity { uintptr_t ptr = 0, path = 0; uint32_t id = 0, cls = 0, generation = 0; };
-    std::array<Identity, 128> previous_{};
+    std::array<Identity, 256> previous_{};
     size_t previousCount_ = 0;
     uint64_t session_ = 0;
     uint32_t serial_ = 0;
@@ -95,20 +101,26 @@ public:
             CollisionGrid grid{};
             if (!duplicate && ReadCollisionGrid(read,rooms[i],grid)) grids[gridCount++]=grid;
         }
-        std::array<uintptr_t,2048> seen{};
-        size_t seenCount=0;
-        std::array<Identity,128> current{};
+        // Heap list: dense farm areas (corpses, items, missiles) easily exceed
+        // a small fixed array. Bounded walk; duplicates rejected after the scan.
+        std::vector<uintptr_t> seen;
+        seen.reserve(1024);
+        std::array<Identity,256> current{};
+        const auto distance2=[&](float x,float z) {
+            const float dx=x-frame.playerX,dz=z-frame.playerZ; return dx*dx+dz*dz;
+        };
         for (size_t r=0;r<=roomCount;++r) {
             if (!rooms[r]) continue;
             bool duplicate=false;
             for (size_t j=0;j<r;++j) if (rooms[j]==rooms[r]) duplicate=true;
             if (duplicate) continue;
             if (!get(rooms[r]+0xa8,unit)) return fail();
+            size_t roomUnits=0;
             while (unit) {
-                if (seenCount==seen.size()) return fail();
-                // A repeated node in different distinct room lists is also inconsistent.
-                for (size_t j=0;j<seenCount;++j) if (seen[j]==unit) return fail();
-                seen[seenCount++]=unit;
+                // A cycle within one list is caught by the bound; repeated nodes
+                // across distinct room lists by the duplicate check below.
+                if (seen.size()>=MaxRoomUnits || ++roomUnits>MaxRoomUnits/2) return fail();
+                seen.push_back(unit);
                 uint32_t type=0, cls=0, uid=0, mode=0, flags=0;
                 uintptr_t next=0, targetPath=0;
                 if (!get(unit,type) || type>6 || !get(unit+0x160,next)) return fail();
@@ -117,10 +129,22 @@ public:
                         !get(unit+0x124,flags)) return fail();
                     if (mode==0 || mode==12 || (flags&0x0e)!=0x0e) ++frame.rejected;
                     else {
-                        if (frame.count==frame.units.size() || !get(unit+0x38,targetPath) || !targetPath) return fail();
+                        if (!get(unit+0x38,targetPath) || !targetPath) return fail();
                         uint32_t x=0,z=0;
                         if (!get(targetPath,x) || !get(targetPath+4,z)) return fail();
                         for (size_t j=0;j<frame.count;++j) if (current[j].id==uid) return fail();
+                        const float ux=float(x)/32768.0f,uz=float(z)/32768.0f;
+                        // Full snapshot: keep the NEAREST units instead of discarding
+                        // the whole frame (targeting used to die in Cow level/Chaos).
+                        size_t slotIndex=frame.count;
+                        if (frame.count==frame.units.size()) {
+                            size_t farthest=0;
+                            for (size_t j=1;j<frame.count;++j)
+                                if (distance2(frame.units[j].x,frame.units[j].z)>distance2(frame.units[farthest].x,frame.units[farthest].z)) farthest=j;
+                            ++frame.dropped;
+                            if (distance2(ux,uz)>=distance2(frame.units[farthest].x,frame.units[farthest].z)) { unit=next; continue; }
+                            slotIndex=farthest;
+                        }
                         Identity identity{unit,targetPath,uid,cls,0};
                         for (size_t j=0;j<previousCount_;++j) {
                             const auto& old=previous_[j];
@@ -142,18 +166,20 @@ public:
                             if (alignment==Alignment::Evil) relation=Relation::Hostile;
                             else if (alignment!=Alignment::Unknown) relation=Relation::Friendly;
                         }
-                        auto& observed=frame.units[frame.count];
-                        observed={{session,uid,identity.generation},cls,
-                            float(x)/32768.0f,float(z)/32768.0f,relation};
-                        if (relation==Relation::Hostile)
+                        auto& observed=frame.units[slotIndex];
+                        observed={{session,uid,identity.generation},cls,ux,uz,relation};
+                        if (relation==Relation::Hostile && distance2(ux,uz)<=SightTraceRange*SightTraceRange)
                             observed.sight=GroundSight(read,grids.data(),gridCount,
                                 frame.playerX,frame.playerZ,observed.x,observed.z);
-                        current[frame.count++]=identity;
+                        current[slotIndex]=identity;
+                        if (slotIndex==frame.count) ++frame.count;
                     }
                 }
                 unit=next;
             }
         }
+        std::sort(seen.begin(),seen.end());
+        if (std::adjacent_find(seen.begin(),seen.end())!=seen.end()) return fail();
         uint32_t finalSlot=0, finalId=0;
         uintptr_t finalPath=0, finalRoom=0;
         if (!get(base+0x2a23704,finalSlot) || finalSlot!=slot ||
